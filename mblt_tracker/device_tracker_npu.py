@@ -4,7 +4,7 @@ import platform
 import shlex
 import subprocess
 import time
-from typing import Dict, Optional
+from typing import Optional
 
 import numpy as np
 
@@ -147,7 +147,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
             self._npu_mem_used_pct_glance.append(npu_mem_used_pct)
             self._mem_used_pct_trace.append((ts, npu_mem_used_pct))
 
-    def get_metric(self) -> Dict[str, Optional[float]]:
+    def get_metric(self) -> dict[str, Optional[float]]:
         """Return summarized NPU metrics since start or last reset.
 
         Returns:

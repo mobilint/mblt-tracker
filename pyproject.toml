@@ -13,7 +13,11 @@ description = "A Python library to track device usage, such as Mobilint NPU, NVI
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 requires-python = ">=3.9,<3.13"
-keywords = ["python", "energy", "power", "utilization", "memory", "energy-consumption", "NPU", "Mobilint", "GPU","NVIDIA", "CPU", "Intel", "monitoring"]
+keywords = [
+    "python", "energy", "power", "utilization", "memory", 
+    "energy-consumption", "NPU", "Mobilint", "GPU", 
+    "NVIDIA", "CPU", "Intel", "monitoring"
+]
 dependencies = [
     "numpy>=1.26.0",
     "setuptools>=70.0.0",
@@ -47,12 +51,14 @@ classifiers = [
 
 [project.urls]
 Home = "https://www.mobilint.com/"
-Repository  = "https://github.com/mobilint/mblt-tracker"
+Repository = "https://github.com/mobilint/mblt-tracker"
+Documentation = "https://github.com/mobilint/mblt-tracker#readme"
+Issues = "https://github.com/mobilint/mblt-tracker/issues"
 
 
 # Tools setting -----------------------------------------
 [tool.setuptools]
-packages = { find = { where = ["."], include = ["mblt_tracker","mblt_tracker.*"] } }
+packages = { find = { where = ["."], include = ["mblt_tracker", "mblt_tracker.*"] } }
 
 [tool.setuptools.dynamic]
 version = { attr = "mblt_tracker.__version__" }
@@ -60,9 +66,50 @@ version = { attr = "mblt_tracker.__version__" }
 [dependency-groups]
 dev = [
     "mblt-model-zoo>=1.0.0",
-    "pre-commit>=4.3.0",
-    "pytest>=8.4.2",
-    "pytest-timeout>=2.4.0",
+    "pre-commit",
+    "pytest",
+    "pytest-timeout",
+    "pytest-cov",
     "tqdm",
     "torch",
+    "ruff",
+    "mypy",
 ]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+]
+ignore = [
+    "E501",  # Line too long (handled by formatter)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mblt_tracker"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --timeout=300"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["mblt_tracker"]
+omit = ["tests/*"]

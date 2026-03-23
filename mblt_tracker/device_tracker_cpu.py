@@ -1,8 +1,6 @@
 import logging
 import time
-from typing import Dict, List, Optional, Union
-
-logging.getLogger().setLevel(logging.ERROR)
+from typing import Optional, Union
 
 import numpy as np
 import psutil
@@ -10,12 +8,14 @@ import pyRAPL
 
 from .device_tracker import BaseDeviceTracker
 
+logging.getLogger().setLevel(logging.ERROR)
+
 
 class CPUDeviceTracker(BaseDeviceTracker):
     """Track CPU power and utilization through RAPL and psutil."""
 
     def __init__(
-        self, interval: float = 0.1, cpu_id: Union[int, List[int], None] = None
+        self, interval: float = 0.1, cpu_id: Union[int, list[int], None] = None
     ):
         """Initialize the CPU device tracker.
 
@@ -110,7 +110,7 @@ class CPUDeviceTracker(BaseDeviceTracker):
             self._mem_used_glance[socket_id].append(float(mem_used_mb))
             self._mem_used_pct_glance[socket_id].append(float(mem_util_pct))
 
-    def get_metric(self) -> Dict[str, object]:
+    def get_metric(self) -> dict[str, object]:
         """Return summarized CPU metrics since start or last reset.
 
         Returns:

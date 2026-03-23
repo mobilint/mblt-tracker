@@ -1,5 +1,5 @@
 import time
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 import numpy as np
 import pynvml
@@ -11,7 +11,7 @@ class GPUDeviceTracker(BaseDeviceTracker):
     """Track GPU power and utilization through NVML."""
 
     def __init__(
-        self, interval: float = 0.1, gpu_id: Union[int, List[int], None] = None
+        self, interval: float = 0.1, gpu_id: Union[int, list[int], None] = None
     ):
         """Initialize the GPU device tracker.
 
@@ -153,14 +153,14 @@ class GPUDeviceTracker(BaseDeviceTracker):
         )
         self._mem_used_pct_trace.append((ts, total_mem_used_pct))
 
-    def get_metric(self) -> Dict[str, object]:
+    def get_metric(self) -> dict[str, object]:
         """Return summarized GPU metrics since start or last reset.
 
         Returns:
             Dict[str, object]: A dictionary containing average and peak power,
                 utilization, and memory statistics for all tracked GPUs.
         """
-        gpu_stats: Dict[int, Dict[str, Optional[float]]] = {}
+        gpu_stats: dict[int, dict[str, Optional[float]]] = {}
         for gpu in self._gpu_id:
             power_samples = self._power_glance[gpu]
             gpu_util_samples = self._gpu_util_glance[gpu]

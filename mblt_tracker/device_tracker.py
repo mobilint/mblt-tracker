@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_RUNNING
@@ -64,7 +64,7 @@ class BaseDeviceTracker(ABC):
         """Scheduled function to capture a single sample of metrics."""
 
     @abstractmethod
-    def get_metric(self) -> Dict:
+    def get_metric(self) -> dict:
         """Return summarized device metrics since start or last reset.
 
         Returns:
@@ -72,7 +72,7 @@ class BaseDeviceTracker(ABC):
         """
 
     @abstractmethod
-    def get_trace(self) -> List[Tuple[float, float]]:
+    def get_trace(self) -> list[tuple[float, float]]:
         """Return a time-series trace of power measurements.
 
         Returns:
