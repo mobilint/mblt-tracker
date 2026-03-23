@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=70.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# Project setting -----------------------------
+[project]
+name = "mblt-tracker"
+authors = [
+    {"name" = "Mobilint Inc.", email = "tech-support@mobilint.com"},
+]
+dynamic = ["version"]
+description = "A Python library to track device usage, such as Mobilint NPU, NVIDIA GPU, Intel CPU, ..."
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+requires-python = ">=3.9,<3.13"
+keywords = ["python", "energy", "power", "utilization", "memory", "energy-consumption", "NPU", "Mobilint", "GPU","NVIDIA", "CPU", "Intel", "monitoring"]
+dependencies = [
+    "numpy>=1.26.0",
+    "setuptools>=70.0.0",
+    "nvidia-ml-py>=12.560.30",
+    "apscheduler>=3.11.2",
+    "pyRAPL>=0.2.3.1",
+    "psutil>=7.0.0",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Monitoring",
+]
+
+[project.urls]
+Home = "https://www.mobilint.com/"
+Repository  = "https://github.com/mobilint/mblt-tracker"
+
+
+# Tools setting -----------------------------------------
+[tool.setuptools]
+packages = { find = { where = ["."], include = ["mblt_tracker","mblt_tracker.*"] } }
+
+[tool.setuptools.dynamic]
+version = { attr = "mblt_tracker.__version__" }
+
+[dependency-groups]
+dev = [
+    "mblt-model-zoo>=1.0.0",
+    "pre-commit>=4.3.0",
+    "pytest>=8.4.2",
+    "pytest-timeout>=2.4.0",
+    "tqdm",
+    "torch",
+]

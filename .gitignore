@@ -1,0 +1,17 @@
+*.egg-info
+*.json
+*.log
+*.o
+*.pyc
+*.so
+*.tar
+*.tgz
+*.whl
+*.zip
+*__pycache__*
+.venv
+.vscode/
+build/
+dist/
+tmp/
+uv.lock
