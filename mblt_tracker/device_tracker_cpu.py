@@ -131,7 +131,6 @@ class CPUDeviceTracker(BaseDeviceTracker):
             return {}
 
         package_temps: dict[int, float] = {}
-        fallback_samples: list[float] = []
         for entries in sensor_groups.values():
             for entry in entries:
                 current = getattr(entry, "current", None)
@@ -142,20 +141,7 @@ class CPUDeviceTracker(BaseDeviceTracker):
                 match = re.search(r"(package id|physical id)\s*(\d+)", label)
                 if match is not None:
                     package_temps[int(match.group(2))] = current
-                else:
-                    fallback_samples.append(current)
-
-        if package_temps:
-            if fallback_samples:
-                fallback_temp = float(np.mean(fallback_samples))
-                for socket_id in self._cpu_id:
-                    package_temps.setdefault(socket_id, fallback_temp)
-            return package_temps
-        if not fallback_samples:
-            return {}
-
-        fallback_temp = float(np.mean(fallback_samples))
-        return {socket_id: fallback_temp for socket_id in self._cpu_id}
+        return package_temps
 
     def get_metric(self) -> dict[str, object]:
         """Return summarized CPU metrics since start or last reset.
