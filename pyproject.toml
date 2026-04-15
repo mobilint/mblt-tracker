@@ -11,7 +11,7 @@ authors = [
 dynamic = ["version"]
 description = "A Python library to track device usage, such as Mobilint NPU, NVIDIA GPU, Intel CPU, ..."
 readme = "README.md"
-license = {text = "BSD-3-Clause"}
+license = "BSD-3-Clause"
 requires-python = ">=3.9,<3.13"
 keywords = [
     "python", "energy", "power", "utilization", "memory", 
@@ -33,7 +33,6 @@ classifiers = [
     "Intended Audience :: Education",
     "Intended Audience :: Science/Research",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: BSD License",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
@@ -59,6 +58,9 @@ Issues = "https://github.com/mobilint/mblt-tracker/issues"
 # Tools setting -----------------------------------------
 [tool.setuptools]
 packages = { find = { where = ["."], include = ["mblt_tracker", "mblt_tracker.*"] } }
+
+[tool.setuptools.package-data]
+mblt_tracker = ["*.sh"]
 
 [tool.setuptools.dynamic]
 version = { attr = "mblt_tracker.__version__" }
