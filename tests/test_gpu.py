@@ -7,6 +7,7 @@ saved to `gpu_metrics.json`.
 
 import json
 import pprint
+import sys
 import time
 
 import torch
@@ -16,7 +17,18 @@ from tqdm import tqdm
 from mblt_tracker import GPUDeviceTracker
 
 if __name__ == "__main__":
-    tracker = GPUDeviceTracker(interval=0.1)
+    if not torch.cuda.is_available():
+        print(
+            "Skipping GPU test: CUDA is not available in the current PyTorch build "
+            "or no CUDA device is visible."
+        )
+        sys.exit(0)
+
+    try:
+        tracker = GPUDeviceTracker(interval=0.1)
+    except Exception as exc:
+        print(f"Skipping GPU test: failed to initialize GPU tracker: {exc}")
+        sys.exit(0)
 
     x: torch.Tensor = torch.rand(10000, 10000).to("cuda")
     y: torch.Tensor = torch.rand(10000, 10000).to("cuda")
