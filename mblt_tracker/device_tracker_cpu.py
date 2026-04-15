@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from typing import Optional, Union
 
@@ -51,11 +52,13 @@ class CPUDeviceTracker(BaseDeviceTracker):
         self._mem_used_glance = {cpu: [] for cpu in self._cpu_id}
         self._mem_used_pct_glance = {cpu: [] for cpu in self._cpu_id}
         self._mem_total_mb: Optional[float] = None
+        self._temp_glance = {cpu: [] for cpu in self._cpu_id}
         self._power_trace: list[tuple[float, float]] = []
         self._cpu_util_trace: list[tuple[float, float]] = []
         self._mem_util_trace: list[tuple[float, float]] = []
         self._mem_used_trace: list[tuple[float, float]] = []
         self._mem_used_pct_trace: list[tuple[float, float]] = []
+        self._temp_trace: list[tuple[float, float]] = []
         self._meter: Optional[pyRAPL.Measurement] = None
 
     def cpu_num(self) -> int:
@@ -110,6 +113,36 @@ class CPUDeviceTracker(BaseDeviceTracker):
             self._mem_used_glance[socket_id].append(float(mem_used_mb))
             self._mem_used_pct_glance[socket_id].append(float(mem_util_pct))
 
+        socket_temps = self._cpu_temperatures()
+        tracked_temps = []
+        for socket_id in self._cpu_id:
+            temp_c = socket_temps.get(socket_id)
+            if temp_c is not None:
+                self._temp_glance[socket_id].append(temp_c)
+                tracked_temps.append(temp_c)
+        if tracked_temps:
+            self._temp_trace.append((ts, float(np.mean(tracked_temps))))
+
+    def _cpu_temperatures(self) -> dict[int, float]:
+        """Best-effort mapping of current CPU temperatures to tracked sockets."""
+        try:
+            sensor_groups = psutil.sensors_temperatures()
+        except (AttributeError, OSError):
+            return {}
+
+        package_temps: dict[int, float] = {}
+        for entries in sensor_groups.values():
+            for entry in entries:
+                current = getattr(entry, "current", None)
+                if current is None:
+                    continue
+                current = float(current)
+                label = (getattr(entry, "label", "") or "").lower()
+                match = re.search(r"(package id|physical id)\s*(\d+)", label)
+                if match is not None:
+                    package_temps[int(match.group(2))] = current
+        return package_temps
+
     def get_metric(self) -> dict[str, object]:
         """Return summarized CPU metrics since start or last reset.
 
@@ -123,6 +156,7 @@ class CPUDeviceTracker(BaseDeviceTracker):
             util_samples = self._cpu_util_glance[cpu]
             mem_used_samples = self._mem_used_glance[cpu]
             mem_used_pct_samples = self._mem_used_pct_glance[cpu]
+            temp_samples = self._temp_glance[cpu]
             cpu_stats[cpu] = {
                 "avg_power_w": float(np.mean(power_samples)) if power_samples else None,
                 "p99_power_w": (
@@ -161,12 +195,22 @@ class CPUDeviceTracker(BaseDeviceTracker):
                     if mem_used_pct_samples
                     else None
                 ),
+                "avg_temperature_c": (
+                    float(np.mean(temp_samples)) if temp_samples else None
+                ),
+                "p99_temperature_c": (
+                    float(np.percentile(temp_samples, 99)) if temp_samples else None
+                ),
+                "max_temperature_c": (
+                    float(np.max(temp_samples)) if temp_samples else None
+                ),
             }
 
         total_power_samples = [p for _, p in self._power_trace]
         total_util_samples = [u for _, u in self._cpu_util_trace]
         total_mem_used_samples = [m for _, m in self._mem_used_trace]
         total_mem_used_pct_samples = [m for _, m in self._mem_used_pct_trace]
+        total_temp_samples = [t for _, t in self._temp_trace]
 
         avg_util_pct = (
             float(np.mean(total_util_samples)) if total_util_samples else None
@@ -222,6 +266,17 @@ class CPUDeviceTracker(BaseDeviceTracker):
                 if total_mem_used_pct_samples
                 else None
             ),
+            "avg_temperature_c": (
+                float(np.mean(total_temp_samples)) if total_temp_samples else None
+            ),
+            "p99_temperature_c": (
+                float(np.percentile(total_temp_samples, 99))
+                if total_temp_samples
+                else None
+            ),
+            "max_temperature_c": (
+                float(np.max(total_temp_samples)) if total_temp_samples else None
+            ),
             "samples": len(total_power_samples),
             "util_samples": len(total_util_samples),
             "cpu": cpu_stats,
@@ -243,6 +298,10 @@ class CPUDeviceTracker(BaseDeviceTracker):
         """
         return list(self._cpu_util_trace)
 
+    def get_temp_trace(self) -> list[tuple[float, float]]:
+        """Return a time-series trace of average CPU temperature."""
+        return list(self._temp_trace)
+
     def reset(self) -> None:
         """Reset all collected CPU metrics and traces."""
         self._power_glance = {cpu: [] for cpu in self._cpu_id}
@@ -251,8 +310,10 @@ class CPUDeviceTracker(BaseDeviceTracker):
         self._mem_used_glance = {cpu: [] for cpu in self._cpu_id}
         self._mem_used_pct_glance = {cpu: [] for cpu in self._cpu_id}
         self._mem_total_mb = None
+        self._temp_glance = {cpu: [] for cpu in self._cpu_id}
         self._power_trace = []
         self._cpu_util_trace = []
         self._mem_util_trace = []
         self._mem_used_trace = []
         self._mem_used_pct_trace = []
+        self._temp_trace = []

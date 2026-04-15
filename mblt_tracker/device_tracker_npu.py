@@ -40,11 +40,13 @@ class NPUDeviceTracker(BaseDeviceTracker):
         self._npu_util_glance: list[float] = []
         self._npu_mem_used_mb_glance: list[float] = []
         self._npu_mem_used_pct_glance: list[float] = []
+        self._npu_temp_glance: list[float] = []
         self._npu_mem_total_mb: Optional[float] = None
         self._power_trace: list[tuple[float, float]] = []
         self._util_trace: list[tuple[float, float]] = []
         self._mem_used_trace: list[tuple[float, float]] = []
         self._mem_used_pct_trace: list[tuple[float, float]] = []
+        self._temp_trace: list[tuple[float, float]] = []
 
     def _fetch_metrics(
         self,
@@ -56,14 +58,15 @@ class NPUDeviceTracker(BaseDeviceTracker):
             Optional[float],
             Optional[float],
             Optional[float],
+            Optional[float],
         ]
     ]:
         """Execute the status command and parse the JSON output.
 
         Returns:
             Optional[tuple]: A tuple containing (npu_power_w, total_power_w,
-                npu_util_pct, npu_mem_used_mb, npu_mem_total_mb, npu_mem_used_pct)
-                if successful, else None.
+                npu_util_pct, npu_mem_used_mb, npu_mem_total_mb,
+                npu_mem_used_pct, npu_temp_c) if successful, else None.
         """
         try:
             result = subprocess.run(
@@ -109,6 +112,9 @@ class NPUDeviceTracker(BaseDeviceTracker):
             npu_mem_used_pct = (npu_mem_used_mb / npu_mem_total_mb) * 100.0
         elif npu_mem_used_pct is not None:
             npu_mem_used_pct = float(npu_mem_used_pct)
+        npu_temp_c = payload.get("npu_temp_c")
+        if npu_temp_c is not None:
+            npu_temp_c = float(npu_temp_c)
         return (
             npu_power_w,
             total_power_w,
@@ -116,6 +122,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
             npu_mem_used_mb,
             npu_mem_total_mb,
             npu_mem_used_pct,
+            npu_temp_c,
         )
 
     def _func_for_sched(self) -> None:
@@ -130,6 +137,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
             npu_mem_used_mb,
             npu_mem_total_mb,
             npu_mem_used_pct,
+            npu_temp_c,
         ) = metrics
         ts = time.time()
         self._npu_power_glance.append(npu_power_w)
@@ -146,6 +154,9 @@ class NPUDeviceTracker(BaseDeviceTracker):
         if npu_mem_used_pct is not None:
             self._npu_mem_used_pct_glance.append(npu_mem_used_pct)
             self._mem_used_pct_trace.append((ts, npu_mem_used_pct))
+        if npu_temp_c is not None:
+            self._npu_temp_glance.append(npu_temp_c)
+            self._temp_trace.append((ts, npu_temp_c))
 
     def get_metric(self) -> dict[str, Optional[float]]:
         """Return summarized NPU metrics since start or last reset.
@@ -221,6 +232,17 @@ class NPUDeviceTracker(BaseDeviceTracker):
             if self._npu_mem_used_pct_glance
             else None
         )
+        npu_temp_avg = (
+            float(np.mean(self._npu_temp_glance)) if self._npu_temp_glance else None
+        )
+        npu_temp_p99 = (
+            float(np.percentile(self._npu_temp_glance, 99))
+            if self._npu_temp_glance
+            else None
+        )
+        npu_temp_max = (
+            float(np.max(self._npu_temp_glance)) if self._npu_temp_glance else None
+        )
         return {
             "avg_power_w": total_avg,
             "p99_power_w": total_p99,
@@ -245,6 +267,9 @@ class NPUDeviceTracker(BaseDeviceTracker):
             "avg_memory_used_pct": npu_mem_used_pct_avg,
             "p99_memory_used_pct": npu_mem_used_pct_p99,
             "max_memory_used_pct": npu_mem_used_pct_max,
+            "avg_temperature_c": npu_temp_avg,
+            "p99_temperature_c": npu_temp_p99,
+            "max_temperature_c": npu_temp_max,
             "samples": len(self._power_trace),
             "util_samples": len(self._util_trace),
         }
@@ -265,6 +290,10 @@ class NPUDeviceTracker(BaseDeviceTracker):
         """
         return list(self._util_trace)
 
+    def get_temp_trace(self) -> list[tuple[float, float]]:
+        """Return a time-series trace of NPU temperature."""
+        return list(self._temp_trace)
+
     def reset(self) -> None:
         """Reset all collected NPU metrics and traces."""
         self._npu_power_glance = []
@@ -272,8 +301,10 @@ class NPUDeviceTracker(BaseDeviceTracker):
         self._npu_util_glance = []
         self._npu_mem_used_mb_glance = []
         self._npu_mem_used_pct_glance = []
+        self._npu_temp_glance = []
         self._npu_mem_total_mb = None
         self._power_trace = []
         self._util_trace = []
         self._mem_used_trace = []
         self._mem_used_pct_trace = []
+        self._temp_trace = []

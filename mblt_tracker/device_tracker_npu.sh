@@ -100,6 +100,22 @@ if [[ -n "$npu_mem_used_mb" && -n "$npu_mem_total_mb" ]]; then
         awk -v used="$npu_mem_used_mb" -v total="$npu_mem_total_mb" 'BEGIN { if (total > 0) printf "%.6f", (used/total)*100.0; }'
     )"
 fi
+npu_temp_c="$(
+    printf '%s\n' "$status_output" \
+    | awk '
+        /\| Sig[[:space:]]+Temp[[:space:]]+Firmware Version[[:space:]]*\|/ {
+            in_temp_section = 1
+            next
+        }
+        in_temp_section && /^\|/ {
+            if ($0 ~ /[0-9]+(\.[0-9]+)?[[:space:]]*C([[:space:]]|\|)/) {
+                print
+                exit
+            }
+        }
+    ' \
+    | sed -nE 's/^.*\|[[:space:]]*[0-9]+[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*C([[:space:]]|\|).*$/\1/p'
+)"
 timestamp="$(date +%s)"
 
 if [[ -z "$npu_power_w" || -z "$total_power_w" ]]; then
@@ -127,14 +143,18 @@ if [[ "$JSON_MODE" == "true" ]]; then
     if [[ -n "$npu_mem_used_pct" ]]; then
         json_fields="$json_fields,\"npu_mem_used_pct\":$npu_mem_used_pct"
     fi
+    if [[ -n "$npu_temp_c" ]]; then
+        json_fields="$json_fields,\"npu_temp_c\":$npu_temp_c"
+    fi
     json_fields="$json_fields,\"timestamp\":$timestamp"
     printf '{%s}\n' "$json_fields"
 else
-    printf '%s %s %s %s %s %s\n' \
+    printf '%s %s %s %s %s %s %s\n' \
         "$npu_power_w" \
         "$total_power_w" \
         "${npu_util_pct:-}" \
         "${npu_mem_used_mb:-}" \
         "${npu_mem_total_mb:-}" \
-        "${npu_mem_used_pct:-}"
+        "${npu_mem_used_pct:-}" \
+        "${npu_temp_c:-}"
 fi

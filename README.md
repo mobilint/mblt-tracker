@@ -8,7 +8,7 @@
 </a>
 </p>
 <p>
-    <b>A lightweight Python library for tracking hardware metrics (Power, Utilization, Memory) across CPU, GPU, and NPU.</b>
+    <b>A lightweight Python library for tracking hardware metrics (Power, Utilization, Memory, Temperature) across CPU, GPU, and NPU.</b>
 </p>
 </div>
 <!-- markdownlint-enable MD033 -->
@@ -21,7 +21,7 @@
 
 - **Multi-Backend Support**: Unified interface for Intel CPU, NVIDIA GPU, and Mobilint NPU.
 - **Background Tracking**: Uses a background scheduler to poll metrics without blocking your main execution.
-- **Comprehensive Metrics**: Capture Power (Watts), Utilization (%), and Memory Usage (MB/%).
+- **Comprehensive Metrics**: Capture Power (Watts), Utilization (%), Memory Usage (MB/%), and Temperature (C).
 - **Statistical Summaries**: Automatically calculates averages, peaks (max), and p99 values.
 - **Time-Series Traces**: Export raw data for custom plotting and analysis.
 - **Lightweight**: Minimal overhead, designed for production and research environments.
@@ -70,8 +70,13 @@ tracker.stop()
 
 # 4. Access results
 metrics = tracker.get_metric()
-print(f"Average Power: {metrics['avg_power_w']:.2f} W")
-print(f"Max Utilization: {metrics['max_utilization_pct']:.2f} %")
+
+def format_metric(value, unit):
+    return f"{value:.2f} {unit}" if value is not None else f"N/A {unit}"
+
+print(f"Average Power: {format_metric(metrics['avg_power_w'], 'W')}")
+print(f"Max Utilization: {format_metric(metrics['max_utilization_pct'], '%')}")
+print(f"Max Temperature: {format_metric(metrics['max_temperature_c'], 'C')}")
 
 # 5. Export time-series trace (list of (timestamp, power_w))
 trace = tracker.get_trace()
@@ -105,6 +110,7 @@ Uses **pyRAPL** for power measurements and **psutil** for utilization/memory.
 - **Docker**: Run containers with `--privileged` or mount the powercap directory.
 
 - **Features**: Tracks total system CPU usage or specific indices (e.g., `CPUDeviceTracker(cpu_id=[0, 1])`).
+- **Temperature**: Uses `psutil.sensors_temperatures()` when the platform exposes CPU thermal sensors.
 
 ### NVIDIA GPU
 
@@ -112,6 +118,7 @@ Uses **NVML** (via `nvidia-ml-py`) for high-fidelity hardware monitoring.
 
 - **Features**: Tracks total system GPU usage or specific indices (e.g., `GPUDeviceTracker(gpu_id=[0, 1])`).
 - **Dependencies**: Requires NVIDIA Drivers and NVML library installed.
+- **Temperature**: Reads on-die GPU temperature through NVML.
 
 ### Mobilint NPU
 
@@ -120,6 +127,7 @@ Polls the `mobilint-cli status` command.
 - **Platform**: Currently supports **Linux only**.
 - **Requirement**: Ensure [Mobilint Utility Tool](https://docs.mobilint.com/v1.0/en/installing_utility.html) is installed and `mobilint-cli` is in your PATH.
 - **NPU Power**: Distinguishes between NPU-specific power and total system power.
+- **Temperature**: Parses NPU temperature from `mobilint-cli status` output when available.
 
 ---
 
@@ -136,6 +144,7 @@ Calling `get_metric()` returns a dictionary with the following standard keys (wh
   "max_utilization_pct": 95.0,  // Peak device utilization
   "avg_memory_used_mb": 2048.0, // Average memory usage
   "total_memory_mb": 8192.0,    // Total available memory
+  "avg_temperature_c": 72.3,    // Average device temperature
   "samples": 100                // Number of data points collected
 }
 ```

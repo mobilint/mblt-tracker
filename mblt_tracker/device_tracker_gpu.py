@@ -47,12 +47,14 @@ class GPUDeviceTracker(BaseDeviceTracker):
         self._mem_util_glance = {gpu: [] for gpu in self._gpu_id}
         self._mem_used_glance = {gpu: [] for gpu in self._gpu_id}
         self._mem_used_pct_glance = {gpu: [] for gpu in self._gpu_id}
+        self._temp_glance = {gpu: [] for gpu in self._gpu_id}
         self._mem_total_mb = {}
         self._power_trace: list[tuple[float, float]] = []
         self._gpu_util_trace: list[tuple[float, float]] = []
         self._mem_util_trace: list[tuple[float, float]] = []
         self._mem_used_trace: list[tuple[float, float]] = []
         self._mem_used_pct_trace: list[tuple[float, float]] = []
+        self._temp_trace: list[tuple[float, float]] = []
         self.driver_version = pynvml.nvmlSystemGetDriverVersion()
         self.cuda_version = pynvml.nvmlSystemGetCudaDriverVersion()
         self.device_name = {
@@ -110,42 +112,86 @@ class GPUDeviceTracker(BaseDeviceTracker):
             mem_info.append((used_mb, total_mb))
         return mem_info
 
+    def gpu_temperature(self) -> list[float]:
+        """Get the current temperature for tracked GPUs in Celsius."""
+        temperatures = []
+        for i in self._gpu_id:
+            temp_c = pynvml.nvmlDeviceGetTemperature(
+                pynvml.nvmlDeviceGetHandleByIndex(i),
+                pynvml.NVML_TEMPERATURE_GPU,
+            )
+            temperatures.append(float(temp_c))
+        return temperatures
+
+    def _safe_gpu_power(self, gpu: int) -> Optional[float]:
+        """Return GPU power in Watts, or None when NVML power sampling fails."""
+        try:
+            power_mw = pynvml.nvmlDeviceGetPowerUsage(
+                pynvml.nvmlDeviceGetHandleByIndex(gpu)
+            )
+        except pynvml.NVMLError:
+            return None
+        return float(power_mw) / 1000.0
+
+    def _safe_gpu_temperature(self, gpu: int) -> Optional[float]:
+        """Return GPU temperature in Celsius, or None when NVML temperature fails."""
+        try:
+            temp_c = pynvml.nvmlDeviceGetTemperature(
+                pynvml.nvmlDeviceGetHandleByIndex(gpu),
+                pynvml.NVML_TEMPERATURE_GPU,
+            )
+        except pynvml.NVMLError:
+            return None
+        return float(temp_c)
+
     def _func_for_sched(self) -> None:
         """Sample GPU power, utilization, and memory usage."""
-        power_usage = self.gpu_power()
         utilization = self.gpu_utilization()
         memory_info = self.gpu_memory_info()
         ts = time.time()
         total_power_w = 0.0
+        power_samples = 0
         total_gpu_util_pct = 0.0
         total_mem_util_pct = 0.0
         total_mem_used_mb = 0.0
         total_mem_capacity_mb = 0.0
+        total_temp_c = 0.0
+        temp_samples = 0
 
         for idx, gpu in enumerate(self._gpu_id):
-            power_w = float(power_usage[idx]) / 1000.0
             gpu_util_pct, mem_util_pct = utilization[idx]
             mem_used_mb, mem_total_mb = memory_info[idx]
+            power_w = self._safe_gpu_power(gpu)
+            temp_c = self._safe_gpu_temperature(gpu)
             mem_used_pct = (
                 (mem_used_mb / mem_total_mb * 100.0) if mem_total_mb > 0 else 0.0
             )
-            self._power_glance[gpu].append(power_w)
             self._gpu_util_glance[gpu].append(gpu_util_pct)
             self._mem_util_glance[gpu].append(mem_util_pct)
             self._mem_used_glance[gpu].append(mem_used_mb)
             self._mem_used_pct_glance[gpu].append(mem_used_pct)
             self._mem_total_mb[gpu] = mem_total_mb
-            total_power_w += power_w
             total_gpu_util_pct += gpu_util_pct
             total_mem_util_pct += mem_util_pct
             total_mem_used_mb += mem_used_mb
             total_mem_capacity_mb += mem_total_mb
+            if power_w is not None:
+                self._power_glance[gpu].append(power_w)
+                total_power_w += power_w
+                power_samples += 1
+            if temp_c is not None:
+                self._temp_glance[gpu].append(temp_c)
+                total_temp_c += temp_c
+                temp_samples += 1
 
         divisor = float(len(self._gpu_id))
-        self._power_trace.append((ts, total_power_w))
         self._gpu_util_trace.append((ts, total_gpu_util_pct / divisor))
         self._mem_util_trace.append((ts, total_mem_util_pct / divisor))
         self._mem_used_trace.append((ts, total_mem_used_mb))
+        if power_samples:
+            self._power_trace.append((ts, total_power_w))
+        if temp_samples:
+            self._temp_trace.append((ts, total_temp_c / float(temp_samples)))
         total_mem_used_pct = (
             total_mem_used_mb / total_mem_capacity_mb * 100.0
             if total_mem_capacity_mb > 0
@@ -167,6 +213,7 @@ class GPUDeviceTracker(BaseDeviceTracker):
             mem_util_samples = self._mem_util_glance[gpu]
             mem_used_samples = self._mem_used_glance[gpu]
             mem_used_pct_samples = self._mem_used_pct_glance[gpu]
+            temp_samples = self._temp_glance[gpu]
             gpu_stats[gpu] = {
                 "avg_power_w": float(np.mean(power_samples)) if power_samples else None,
                 "p99_power_w": (
@@ -219,6 +266,15 @@ class GPUDeviceTracker(BaseDeviceTracker):
                     if mem_used_pct_samples
                     else None
                 ),
+                "avg_temperature_c": (
+                    float(np.mean(temp_samples)) if temp_samples else None
+                ),
+                "p99_temperature_c": (
+                    float(np.percentile(temp_samples, 99)) if temp_samples else None
+                ),
+                "max_temperature_c": (
+                    float(np.max(temp_samples)) if temp_samples else None
+                ),
             }
 
         total_power_samples = [p for _, p in self._power_trace]
@@ -226,6 +282,15 @@ class GPUDeviceTracker(BaseDeviceTracker):
         total_mem_util_samples = [u for _, u in self._mem_util_trace]
         total_mem_used_samples = [m for _, m in self._mem_used_trace]
         total_mem_used_pct_samples = [m for _, m in self._mem_used_pct_trace]
+        total_temp_samples = [t for _, t in self._temp_trace]
+        total_sample_count = max(
+            len(total_power_samples),
+            len(total_gpu_util_samples),
+            len(total_mem_util_samples),
+            len(total_mem_used_samples),
+            len(total_mem_used_pct_samples),
+            len(total_temp_samples),
+        )
         total_mem_capacity_mb = (
             float(sum(self._mem_total_mb.values())) if self._mem_total_mb else None
         )
@@ -300,7 +365,18 @@ class GPUDeviceTracker(BaseDeviceTracker):
                 if total_mem_used_pct_samples
                 else None
             ),
-            "samples": len(total_power_samples),
+            "avg_temperature_c": (
+                float(np.mean(total_temp_samples)) if total_temp_samples else None
+            ),
+            "p99_temperature_c": (
+                float(np.percentile(total_temp_samples, 99))
+                if total_temp_samples
+                else None
+            ),
+            "max_temperature_c": (
+                float(np.max(total_temp_samples)) if total_temp_samples else None
+            ),
+            "samples": total_sample_count,
             "util_samples": len(total_gpu_util_samples),
             "gpu": gpu_stats,
         }
@@ -321,6 +397,10 @@ class GPUDeviceTracker(BaseDeviceTracker):
         """
         return list(self._gpu_util_trace)
 
+    def get_temp_trace(self) -> list[tuple[float, float]]:
+        """Return a time-series trace of average GPU temperature."""
+        return list(self._temp_trace)
+
     def reset(self) -> None:
         """Reset all collected GPU metrics and traces."""
         self._power_glance = {gpu: [] for gpu in self._gpu_id}
@@ -328,9 +408,11 @@ class GPUDeviceTracker(BaseDeviceTracker):
         self._mem_util_glance = {gpu: [] for gpu in self._gpu_id}
         self._mem_used_glance = {gpu: [] for gpu in self._gpu_id}
         self._mem_used_pct_glance = {gpu: [] for gpu in self._gpu_id}
+        self._temp_glance = {gpu: [] for gpu in self._gpu_id}
         self._mem_total_mb = {}
         self._power_trace = []
         self._gpu_util_trace = []
         self._mem_util_trace = []
         self._mem_used_trace = []
         self._mem_used_pct_trace = []
+        self._temp_trace = []
