@@ -123,48 +123,75 @@ class GPUDeviceTracker(BaseDeviceTracker):
             temperatures.append(float(temp_c))
         return temperatures
 
+    def _safe_gpu_power(self, gpu: int) -> Optional[float]:
+        """Return GPU power in Watts, or None when NVML power sampling fails."""
+        try:
+            power_mw = pynvml.nvmlDeviceGetPowerUsage(
+                pynvml.nvmlDeviceGetHandleByIndex(gpu)
+            )
+        except pynvml.NVMLError:
+            return None
+        return float(power_mw) / 1000.0
+
+    def _safe_gpu_temperature(self, gpu: int) -> Optional[float]:
+        """Return GPU temperature in Celsius, or None when NVML temperature fails."""
+        try:
+            temp_c = pynvml.nvmlDeviceGetTemperature(
+                pynvml.nvmlDeviceGetHandleByIndex(gpu),
+                pynvml.NVML_TEMPERATURE_GPU,
+            )
+        except pynvml.NVMLError:
+            return None
+        return float(temp_c)
+
     def _func_for_sched(self) -> None:
         """Sample GPU power, utilization, and memory usage."""
-        power_usage = self.gpu_power()
         utilization = self.gpu_utilization()
         memory_info = self.gpu_memory_info()
-        temperatures = self.gpu_temperature()
         ts = time.time()
         total_power_w = 0.0
+        power_samples = 0
         total_gpu_util_pct = 0.0
         total_mem_util_pct = 0.0
         total_mem_used_mb = 0.0
         total_mem_capacity_mb = 0.0
         total_temp_c = 0.0
+        temp_samples = 0
 
         for idx, gpu in enumerate(self._gpu_id):
-            power_w = float(power_usage[idx]) / 1000.0
             gpu_util_pct, mem_util_pct = utilization[idx]
             mem_used_mb, mem_total_mb = memory_info[idx]
-            temp_c = temperatures[idx]
+            power_w = self._safe_gpu_power(gpu)
+            temp_c = self._safe_gpu_temperature(gpu)
             mem_used_pct = (
                 (mem_used_mb / mem_total_mb * 100.0) if mem_total_mb > 0 else 0.0
             )
-            self._power_glance[gpu].append(power_w)
             self._gpu_util_glance[gpu].append(gpu_util_pct)
             self._mem_util_glance[gpu].append(mem_util_pct)
             self._mem_used_glance[gpu].append(mem_used_mb)
             self._mem_used_pct_glance[gpu].append(mem_used_pct)
-            self._temp_glance[gpu].append(temp_c)
             self._mem_total_mb[gpu] = mem_total_mb
-            total_power_w += power_w
             total_gpu_util_pct += gpu_util_pct
             total_mem_util_pct += mem_util_pct
             total_mem_used_mb += mem_used_mb
             total_mem_capacity_mb += mem_total_mb
-            total_temp_c += temp_c
+            if power_w is not None:
+                self._power_glance[gpu].append(power_w)
+                total_power_w += power_w
+                power_samples += 1
+            if temp_c is not None:
+                self._temp_glance[gpu].append(temp_c)
+                total_temp_c += temp_c
+                temp_samples += 1
 
         divisor = float(len(self._gpu_id))
-        self._power_trace.append((ts, total_power_w))
         self._gpu_util_trace.append((ts, total_gpu_util_pct / divisor))
         self._mem_util_trace.append((ts, total_mem_util_pct / divisor))
         self._mem_used_trace.append((ts, total_mem_used_mb))
-        self._temp_trace.append((ts, total_temp_c / divisor))
+        if power_samples:
+            self._power_trace.append((ts, total_power_w))
+        if temp_samples:
+            self._temp_trace.append((ts, total_temp_c / float(temp_samples)))
         total_mem_used_pct = (
             total_mem_used_mb / total_mem_capacity_mb * 100.0
             if total_mem_capacity_mb > 0

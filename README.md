@@ -70,9 +70,13 @@ tracker.stop()
 
 # 4. Access results
 metrics = tracker.get_metric()
-print(f"Average Power: {metrics['avg_power_w']:.2f} W")
-print(f"Max Utilization: {metrics['max_utilization_pct']:.2f} %")
-print(f"Max Temperature: {metrics['max_temperature_c']:.2f} C")
+
+def format_metric(value, unit):
+    return f"{value:.2f} {unit}" if value is not None else f"N/A {unit}"
+
+print(f"Average Power: {format_metric(metrics['avg_power_w'], 'W')}")
+print(f"Max Utilization: {format_metric(metrics['max_utilization_pct'], '%')}")
+print(f"Max Temperature: {format_metric(metrics['max_temperature_c'], 'C')}")
 
 # 5. Export time-series trace (list of (timestamp, power_w))
 trace = tracker.get_trace()
