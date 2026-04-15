@@ -60,3 +60,22 @@ def test_sampling_keeps_util_and_memory_when_power_fails(monkeypatch) -> None:
     assert tracker._power_trace == []
     assert tracker._temp_trace == [(456.0, 67.0)]
     assert tracker._power_glance[0] == []
+
+
+def test_get_metric_counts_samples_when_power_fails(monkeypatch) -> None:
+    tracker = _make_tracker()
+
+    monkeypatch.setattr(tracker, "gpu_utilization", lambda: [(88.0, 33.0)])
+    monkeypatch.setattr(tracker, "gpu_memory_info", lambda: [(512.0, 2048.0)])
+    monkeypatch.setattr(tracker, "_safe_gpu_power", lambda gpu: None)
+    monkeypatch.setattr(tracker, "_safe_gpu_temperature", lambda gpu: 67.0)
+    monkeypatch.setattr("mblt_tracker.device_tracker_gpu.time.time", lambda: 456.0)
+
+    tracker._func_for_sched()
+    metrics = tracker.get_metric()
+
+    assert metrics["samples"] == 1
+    assert metrics["util_samples"] == 1
+    assert metrics["avg_power_w"] is None
+    assert metrics["avg_gpu_util_pct"] == 88.0
+    assert metrics["avg_memory_used_mb"] == 512.0

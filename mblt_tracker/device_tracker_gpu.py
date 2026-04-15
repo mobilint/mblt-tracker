@@ -283,6 +283,14 @@ class GPUDeviceTracker(BaseDeviceTracker):
         total_mem_used_samples = [m for _, m in self._mem_used_trace]
         total_mem_used_pct_samples = [m for _, m in self._mem_used_pct_trace]
         total_temp_samples = [t for _, t in self._temp_trace]
+        total_sample_count = max(
+            len(total_power_samples),
+            len(total_gpu_util_samples),
+            len(total_mem_util_samples),
+            len(total_mem_used_samples),
+            len(total_mem_used_pct_samples),
+            len(total_temp_samples),
+        )
         total_mem_capacity_mb = (
             float(sum(self._mem_total_mb.values())) if self._mem_total_mb else None
         )
@@ -368,7 +376,7 @@ class GPUDeviceTracker(BaseDeviceTracker):
             "max_temperature_c": (
                 float(np.max(total_temp_samples)) if total_temp_samples else None
             ),
-            "samples": len(total_power_samples),
+            "samples": total_sample_count,
             "util_samples": len(total_gpu_util_samples),
             "gpu": gpu_stats,
         }
