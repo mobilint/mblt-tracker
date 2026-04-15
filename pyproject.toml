@@ -11,7 +11,7 @@ authors = [
 dynamic = ["version"]
 description = "A Python library to track device usage, such as Mobilint NPU, NVIDIA GPU, Intel CPU, ..."
 readme = "README.md"
-license = "BSD-3-Clause"
+license = { text = "BSD-3-Clause" }
 requires-python = ">=3.9,<3.13"
 keywords = [
     "python", "energy", "power", "utilization", "memory", 
