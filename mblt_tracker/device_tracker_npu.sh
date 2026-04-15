@@ -108,12 +108,13 @@ npu_temp_c="$(
             next
         }
         in_temp_section && /^\|/ {
-            if (match($0, /^\|[[:space:]]*[0-9]+[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*C([[:space:]]|\|)/, matches)) {
-                print matches[1]
+            if ($0 ~ /[0-9]+(\.[0-9]+)?[[:space:]]*C([[:space:]]|\|)/) {
+                print
                 exit
             }
         }
-    '
+    ' \
+    | sed -nE 's/^.*\|[[:space:]]*[0-9]+[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*C([[:space:]]|\|).*$/\1/p'
 )"
 timestamp="$(date +%s)"
 
