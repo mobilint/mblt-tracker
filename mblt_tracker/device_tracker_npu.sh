@@ -101,13 +101,19 @@ if [[ -n "$npu_mem_used_mb" && -n "$npu_mem_total_mb" ]]; then
     )"
 fi
 npu_temp_c="$(
-    {
-        printf '%s\n' "$status_output" | grep -i 'temp' || true
-        printf '%s\n' "$status_output"
-    } \
-    | grep -Eo '[0-9]+(\.[0-9]+)?[[:space:]]*°?C' \
-    | head -n 1 \
-    | sed -E 's/[[:space:]°C]//g'
+    printf '%s\n' "$status_output" \
+    | awk '
+        /\| Sig[[:space:]]+Temp[[:space:]]+Firmware Version[[:space:]]*\|/ {
+            in_temp_section = 1
+            next
+        }
+        in_temp_section && /^\|/ {
+            if (match($0, /^\|[[:space:]]*[0-9]+[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*C([[:space:]]|\|)/, matches)) {
+                print matches[1]
+                exit
+            }
+        }
+    '
 )"
 timestamp="$(date +%s)"
 
