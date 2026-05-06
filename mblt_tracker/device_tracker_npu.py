@@ -1,6 +1,7 @@
 import json
 import os
 import platform
+import re
 import shlex
 import subprocess
 import time
@@ -9,6 +10,7 @@ from typing import Optional
 import numpy as np
 
 from .device_tracker import BaseDeviceTracker
+from .static_info import get_pcie_static_info, run_command
 
 
 class NPUDeviceTracker(BaseDeviceTracker):
@@ -282,6 +284,23 @@ class NPUDeviceTracker(BaseDeviceTracker):
         """
         return list(self._power_trace)
 
+    def get_static_info(self) -> dict[str, object]:
+        """Return best-effort NPU static information.
+
+        The PCIe section is collected from Linux sysfs when available. Firmware,
+        driver, product, and form-factor fields are parsed from ``mobilint-cli
+        status`` on a best-effort basis.
+        """
+        info = get_pcie_static_info(
+            vendor_id=os.environ.get("MBLT_TRACKER_NPU_PCI_VENDOR_ID", "1ed5"),
+            device_id=os.environ.get("MBLT_TRACKER_NPU_PCI_DEVICE_ID"),
+            class_filter=os.environ.get("MBLT_TRACKER_NPU_PCI_CLASS_FILTER"),
+        )
+        status_output = run_command(["mobilint-cli", "status"])
+        if status_output:
+            info.update(_parse_mobilint_status_static_info(status_output))
+        return info
+
     def get_util_trace(self) -> list[tuple[float, float]]:
         """Return a time-series trace of NPU utilization.
 
@@ -308,3 +327,38 @@ class NPUDeviceTracker(BaseDeviceTracker):
         self._mem_used_trace = []
         self._mem_used_pct_trace = []
         self._temp_trace = []
+
+
+def _parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
+    """Parse static NPU fields from ``mobilint-cli status`` table output."""
+    info: dict[str, object] = {}
+    driver_match = re.search(r"Drivers\s*-\s*Aries:\s*([^\s]+)\s+Regulus:\s*([^\s|]+)", status_output)
+    if driver_match is not None:
+        info["inference.driver.aries_version"] = driver_match.group(1)
+        info["inference.driver.regulus_version"] = driver_match.group(2)
+    device_matches = re.findall(
+        r"\|\s*(\d+)\s+([A-Za-z0-9_-]+)\(([^)]+)\).*?\|", status_output
+    )
+    if device_matches:
+        devices = []
+        products = []
+        for device_index, product, board_name in device_matches:
+            products.append(product)
+            devices.append(
+                {
+                    "device_index": int(device_index),
+                    "product": product,
+                    "board_name": board_name,
+                }
+            )
+        info["hardware.npu.device_count"] = len(devices)
+        info["hardware.npu.devices"] = devices
+        if len(set(products)) == 1:
+            info["hardware.npu.product"] = products[0]
+    firmware_matches = re.findall(
+        r"\|\s*\d+\s+[0-9]+(?:\.[0-9]+)?\s*C\s+([^\s|]+)", status_output
+    )
+    if firmware_matches:
+        info["inference.firmware.version"] = firmware_matches[0]
+        info["inference.firmware.versions"] = firmware_matches
+    return info
