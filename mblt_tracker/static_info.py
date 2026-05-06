@@ -6,6 +6,7 @@ import platform
 import re
 import shlex
 import subprocess
+import sys
 from importlib import metadata
 from pathlib import Path
 from typing import Any, Mapping, Sequence, cast
@@ -140,6 +141,139 @@ def _get_cuda_version() -> str | None:
     if nvcc_output is None:
         return None
     return _parse_nvcc_cuda_version(nvcc_output)
+
+
+def get_nvml_gpu_static_info(
+    pcie_devices: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    """Collect NVIDIA GPU static information through NVML.
+
+    NVML is available on both Linux and Windows when NVIDIA drivers are
+    installed. NVML is the source of truth for the GPU list, while optional
+    PCIe data enriches each NVML GPU entry with link and ID information.
+    """
+    try:
+        import pynvml
+    except ImportError:
+        _warn_nvml_unavailable()
+        return {}
+
+    try:
+        pynvml.nvmlInit()
+    except Exception:
+        _warn_nvml_unavailable()
+        return {}
+
+    try:
+        device_count = pynvml.nvmlDeviceGetCount()
+        driver_version = _decode_nvml_string(pynvml.nvmlSystemGetDriverVersion())
+        cuda_driver_version = _format_nvml_cuda_driver_version(
+            pynvml.nvmlSystemGetCudaDriverVersion()
+        )
+        pcie_gpu_candidates = [
+            device for device in pcie_devices or [] if _is_likely_gpu_device(device)
+        ]
+        gpus = []
+        for device_index in range(device_count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+            name = _decode_nvml_string(pynvml.nvmlDeviceGetName(handle))
+            bus_address = _get_nvml_pci_bus_address(pynvml, handle)
+            matched_pcie = _find_matching_pcie_gpu(
+                pcie_gpu_candidates,
+                bus_address,
+                device_index,
+            )
+            gpu_entry = dict(matched_pcie) if matched_pcie is not None else {}
+            gpu_entry["name"] = name
+            gpu_entry["driver_version"] = driver_version
+            if bus_address is not None:
+                gpu_entry["bus_address"] = bus_address
+            gpus.append(_format_pcie_device(gpu_entry, device_index))
+    except Exception:
+        return {}
+    finally:
+        try:
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
+
+    info: dict[str, object] = {
+        "hardware": {
+            "gpus": gpus,
+        },
+        "inference": {
+            "gpu": {
+                "driver": {"version": driver_version},
+                "cuda_driver": {"version": cuda_driver_version},
+            }
+        },
+    }
+    return info
+
+
+def _warn_nvml_unavailable() -> None:
+    print(
+        "Warning: NVML not available. GPU information will not be collected.",
+        file=sys.stderr,
+    )
+
+
+def _find_matching_pcie_gpu(
+    pcie_gpu_candidates: list[dict[str, object]],
+    bus_address: str | None,
+    device_index: int,
+) -> dict[str, object] | None:
+    if bus_address is not None:
+        for candidate in pcie_gpu_candidates:
+            candidate_bus_address = candidate.get("bus_address")
+            if candidate_bus_address is None:
+                continue
+            if str(candidate_bus_address).lower() == bus_address.lower():
+                return candidate
+
+    nvidia_candidates = [
+        candidate
+        for candidate in pcie_gpu_candidates
+        if _normalize_hex(str(candidate.get("vendor_id", ""))) == "10de"
+        or str(candidate.get("bus_address", "")).upper().startswith("PCI\\VEN_10DE")
+        or "nvidia" in str(candidate.get("manufacturer", "")).lower()
+        or "nvidia" in str(candidate.get("name", "")).lower()
+        or "nvidia" in str(candidate.get("pnp_device_id", "")).lower()
+    ]
+    if device_index < len(nvidia_candidates):
+        return nvidia_candidates[device_index]
+    return None
+
+
+def _decode_nvml_string(value: object) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _format_nvml_cuda_driver_version(value: object) -> str | None:
+    version = _to_int(value)
+    if version is None or version <= 0:
+        return None
+    major = version // 1000
+    minor = (version % 1000) // 10
+    return f"{major}.{minor}"
+
+
+def _get_nvml_pci_bus_address(pynvml_module: object, handle: object) -> str | None:
+    try:
+        pci_info = cast(Any, pynvml_module).nvmlDeviceGetPciInfo(handle)
+    except Exception:
+        return None
+    bus_id = _decode_nvml_string(getattr(pci_info, "busId", "")).strip().lower()
+    if not bus_id:
+        return None
+    # NVML often returns 8-digit PCI domains (e.g. 00000000:17:00.0), while
+    # Linux sysfs commonly uses 4-digit domains (0000:17:00.0).
+    match = re.match(r"([0-9a-f]{8}):(.*)", bus_id, re.IGNORECASE)
+    if match is not None:
+        return f"{match.group(1)[-4:]}:{match.group(2)}"
+    return bus_id
 
 
 def _get_torch_cuda_version() -> str | None:
@@ -626,6 +760,7 @@ def get_pcie_static_info(
     device_id: str | None = None,
     class_filter: str | None = None,
     include_all_devices: bool = False,
+    devices: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Collect best-effort PCIe information.
 
@@ -642,13 +777,8 @@ def get_pcie_static_info(
         hardware keys. Raw ``hardware.pcie_devices`` is included only when
         requested.
     """
-    sysfs_override = os.environ.get("MBLT_TRACKER_PCI_SYSFS")
-    if sysfs_override is not None:
-        devices = _read_pcie_devices(Path(sysfs_override))
-    elif platform.system() == "Windows":
-        devices = _read_pcie_devices_windows()
-    else:
-        devices = _read_pcie_devices(Path("/sys/bus/pci/devices"))
+    if devices is None:
+        devices = get_all_pcie_devices()
     hardware_info: dict[str, object] = {}
     if include_all_devices:
         hardware_info["pcie_devices"] = devices
@@ -662,17 +792,22 @@ def get_pcie_static_info(
         if npu_driver_version is not None:
             inference_info["npu_driver_version"] = npu_driver_version
         hardware_info["npus"] = formatted_npus
-    gpus = _find_all_gpu_devices(devices)
-    if gpus:
-        hardware_info["gpus"] = [
-            _format_pcie_device(device, dev_no) for dev_no, device in enumerate(gpus)
-        ]
     info: dict[str, object] = {}
     if hardware_info:
         info["hardware"] = hardware_info
     if inference_info:
         info["inference"] = inference_info
     return info
+
+
+def get_all_pcie_devices() -> list[dict[str, object]]:
+    """Collect raw PCIe devices for NPU discovery and NVML GPU enrichment."""
+    sysfs_override = os.environ.get("MBLT_TRACKER_PCI_SYSFS")
+    if sysfs_override is not None:
+        return _read_pcie_devices(Path(sysfs_override))
+    if platform.system() == "Windows":
+        return _read_pcie_devices_windows()
+    return _read_pcie_devices(Path("/sys/bus/pci/devices"))
 
 
 def _pop_npu_driver_version(npus: list[dict[str, object]]) -> str | None:
@@ -1218,6 +1353,13 @@ def _is_likely_gpu_device(device: dict[str, object]) -> bool:
     if _is_integrated_gpu_without_pcie_link(device):
         return False
 
+    if _is_gpu_companion_device(device):
+        return False
+
+    vendor = _normalize_hex(str(device.get("vendor_id", "")))
+    if vendor in {"10de", "1002"}:
+        return True
+
     class_code = _normalize_hex(str(device.get("class", "")))
     if class_code is not None and class_code.startswith("03"):
         return True
@@ -1227,6 +1369,42 @@ def _is_likely_gpu_device(device: dict[str, object]) -> bool:
     ).lower()
     gpu_keywords = ("amd", "geforce", "gpu", "nvidia", "radeon", "tesla")
     return any(keyword in text for keyword in gpu_keywords)
+
+
+def _is_gpu_companion_device(device: dict[str, object]) -> bool:
+    """Return true for non-GPU functions exposed by a discrete GPU card.
+
+    NVIDIA/AMD PCIe devices often expose companion functions such as HD audio,
+    USB-C controllers, or bridges under the same vendor ID as the display
+    controller. These devices must not be used to enrich NVML GPU entries.
+    """
+    vendor = _normalize_hex(str(device.get("vendor_id", "")))
+    if vendor not in {"10de", "1002"}:
+        return False
+
+    class_code = _normalize_hex(str(device.get("class", "")))
+    if class_code is not None and class_code.startswith(("04", "0c", "06")):
+        return True
+
+    text = " ".join(
+        str(device.get(key, ""))
+        for key in (
+            "name",
+            "manufacturer",
+            "driver_description",
+            "driver_provider",
+            "pnp_device_id",
+        )
+    ).lower()
+    companion_keywords = (
+        "audio",
+        "high definition audio",
+        "usb",
+        "usb-c",
+        "type-c",
+        "bridge",
+    )
+    return any(keyword in text for keyword in companion_keywords)
 
 
 def _is_integrated_gpu_without_pcie_link(device: dict[str, object]) -> bool:
@@ -1304,9 +1482,16 @@ def _merge_device_lists(
             merged.append(overlay_item)
             continue
         overlay_key = overlay_item.get("dev_no", overlay_index)
+        overlay_has_identity = _has_device_identity(overlay_item)
         matched = False
         for base_index, base_item in enumerate(merged):
             if not isinstance(base_item, dict):
+                continue
+            if _device_identity_matches(base_item, overlay_item):
+                _deep_merge(base_item, overlay_item)
+                matched = True
+                break
+            if overlay_has_identity:
                 continue
             base_key = base_item.get("dev_no", base_index)
             if base_key == overlay_key:
@@ -1316,6 +1501,22 @@ def _merge_device_lists(
         if not matched:
             merged.append(dict(overlay_item))
     return merged
+
+
+def _has_device_identity(item: dict[str, object]) -> bool:
+    return any(item.get(key) is not None for key in ("bus_address", "pnp_device_id"))
+
+
+def _device_identity_matches(
+    base_item: dict[str, object], overlay_item: dict[str, object]
+) -> bool:
+    for key in ("bus_address", "pnp_device_id"):
+        base_value = base_item.get(key)
+        overlay_value = overlay_item.get(key)
+        if base_value is not None and overlay_value is not None:
+            if str(base_value).lower() == str(overlay_value).lower():
+                return True
+    return False
 
 
 def _clean_typed_dict(value: object, schema: object | None = None) -> object:

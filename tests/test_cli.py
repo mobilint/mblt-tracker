@@ -88,6 +88,8 @@ def test_collect_static_info_merges_windows_npu_driver_metadata(monkeypatch) -> 
         },
     )
     monkeypatch.setattr(cli, "get_linux_npu_driver_firmware_info", lambda: {})
+    monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
+    monkeypatch.setattr(cli, "get_nvml_gpu_static_info", lambda pcie_devices: {})
 
     info = cli.collect_static_info()
 
@@ -114,6 +116,8 @@ def test_collect_static_info_merges_linux_npu_driver_firmware_metadata(
         lambda **_kwargs: {"hardware": {"npus": [{"vendor_id": "0x209f"}]}},
     )
     monkeypatch.setattr(cli, "get_windows_npu_driver_firmware_info", lambda: {})
+    monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
+    monkeypatch.setattr(cli, "get_nvml_gpu_static_info", lambda pcie_devices: {})
     monkeypatch.setattr(
         cli,
         "get_linux_npu_driver_firmware_info",

@@ -75,7 +75,10 @@ def test_parse_mobilint_status_static_info() -> None:
     assert info["hardware"]["npus"] == [
         {"dev_no": 0, "board_name": "aries0", "firmware": {"version": "1.2.4"}}
     ]
-    assert "driver" not in info["inference"]
+    assert info["inference"]["driver"] == {
+        "aries_version": "1.12.0",
+        "regulus_version": "N/A",
+    }
 
 
 def test_npu_get_static_info_uses_mobilint_pci_vendor_by_default(monkeypatch) -> None:

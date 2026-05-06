@@ -12,8 +12,10 @@ from ._types import CollectOutput
 from .static_info import (
     _clean_typed_dict,
     _deep_merge,
+    get_all_pcie_devices,
     get_linux_npu_driver_firmware_info,
     get_host_static_info,
+    get_nvml_gpu_static_info,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
 )
@@ -28,6 +30,7 @@ def collect_static_info(
 ) -> CollectOutput:
     """Collect best-effort static host and PCIe information."""
     info = cast(dict[str, object], get_host_static_info(sudo_password=sudo_password))
+    pcie_devices = get_all_pcie_devices()
     _deep_merge(
         info,
         get_pcie_static_info(
@@ -35,8 +38,10 @@ def collect_static_info(
             device_id=pcie_device_id,
             class_filter=pcie_class_filter,
             include_all_devices=all_pcie_devices,
+            devices=pcie_devices,
         ),
     )
+    _deep_merge(info, get_nvml_gpu_static_info(pcie_devices=pcie_devices))
     _deep_merge(info, get_windows_npu_driver_firmware_info())
     _deep_merge(info, get_linux_npu_driver_firmware_info())
     return cast(CollectOutput, _clean_typed_dict(info, CollectOutput))

@@ -8,9 +8,12 @@ from typing import cast
 import mblt_tracker.static_info as static_info
 from mblt_tracker.static_info import (
     _calculate_theoretical_bandwidth_gbps,
+    _deep_merge,
+    _format_nvml_cuda_driver_version,
     _get_cuda_version,
     _get_python_package_version,
     get_cpu_power_policy,
+    get_nvml_gpu_static_info,
     _parse_nvcc_cuda_version,
     _read_windows_pci_link_properties,
     _normalize_windows_power_plan_name,
@@ -55,6 +58,211 @@ def test_get_cuda_version_falls_back_to_nvcc(monkeypatch) -> None:
     )
 
     assert _get_cuda_version() == "12.4"
+
+
+def test_format_nvml_cuda_driver_version() -> None:
+    assert _format_nvml_cuda_driver_version(12080) == "12.8"
+
+
+def test_get_nvml_gpu_static_info_returns_metadata(monkeypatch) -> None:
+    class FakePciInfo:
+        busId = b"00000000:17:00.0"
+
+    class FakeNvml:
+        def __init__(self) -> None:
+            self.shutdown_called = False
+
+        def nvmlInit(self) -> None:
+            return None
+
+        def nvmlShutdown(self) -> None:
+            self.shutdown_called = True
+
+        def nvmlDeviceGetCount(self) -> int:
+            return 1
+
+        def nvmlSystemGetDriverVersion(self) -> bytes:
+            return b"580.95.05"
+
+        def nvmlSystemGetCudaDriverVersion(self) -> int:
+            return 12080
+
+        def nvmlDeviceGetHandleByIndex(self, index: int) -> str:
+            return f"handle-{index}"
+
+        def nvmlDeviceGetName(self, handle: str) -> bytes:
+            assert handle == "handle-0"
+            return b"NVIDIA RTX Test"
+
+        def nvmlDeviceGetPciInfo(self, handle: str) -> FakePciInfo:
+            assert handle == "handle-0"
+            return FakePciInfo()
+
+    fake_nvml = FakeNvml()
+    monkeypatch.setitem(sys.modules, "pynvml", fake_nvml)
+    monkeypatch.setattr(static_info.platform, "system", lambda: "Linux")
+
+    pcie_devices = [
+        {
+            "bus_address": "0000:17:00.0",
+            "vendor_id": "0x10de",
+            "device_id": "0x2bb1",
+            "class": "0x030000",
+            "current_link_speed": "2.5 GT/s PCIe",
+            "current_link_width": "16",
+        }
+    ]
+
+    info = get_nvml_gpu_static_info(pcie_devices=pcie_devices)
+
+    assert fake_nvml.shutdown_called is True
+    assert info == {
+        "hardware": {
+            "gpus": [
+                {
+                    "dev_no": 0,
+                    "bus_address": "0000:17:00.0",
+                    "class": "0x030000",
+                    "current_link_speed": "2.5 GT/s PCIe",
+                    "current_link_width": "16",
+                    "device_id": "0x2bb1",
+                    "driver_version": "580.95.05",
+                    "lane_width": "x16",
+                    "link_generation": "Gen1",
+                    "name": "NVIDIA RTX Test",
+                    "vendor_id": "0x10de",
+                }
+            ],
+        },
+        "inference": {
+            "gpu": {
+                "driver": {"version": "580.95.05"},
+                "cuda_driver": {"version": "12.8"},
+            }
+        },
+    }
+
+
+def test_get_nvml_gpu_static_info_returns_empty_on_unavailable_nvml(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setitem(sys.modules, "pynvml", None)
+
+    assert get_nvml_gpu_static_info() == {}
+    assert "Warning: NVML not available" in capsys.readouterr().err
+
+
+def test_get_nvml_gpu_static_info_matches_windows_pcie_by_nvidia_order(
+    monkeypatch,
+) -> None:
+    class FakePciInfo:
+        busId = b"00000000:03:00.0"
+
+    class FakeNvml:
+        def nvmlInit(self) -> None:
+            return None
+
+        def nvmlShutdown(self) -> None:
+            return None
+
+        def nvmlDeviceGetCount(self) -> int:
+            return 1
+
+        def nvmlSystemGetDriverVersion(self) -> str:
+            return "595.97"
+
+        def nvmlSystemGetCudaDriverVersion(self) -> int:
+            return 13020
+
+        def nvmlDeviceGetHandleByIndex(self, index: int) -> str:
+            return f"handle-{index}"
+
+        def nvmlDeviceGetName(self, _handle: str) -> str:
+            return "NVIDIA GeForce RTX 3090"
+
+        def nvmlDeviceGetPciInfo(self, _handle: str) -> FakePciInfo:
+            return FakePciInfo()
+
+    monkeypatch.setitem(sys.modules, "pynvml", FakeNvml())
+    monkeypatch.setattr(static_info.platform, "system", lambda: "Windows")
+
+    pcie_devices = [
+        {
+            "dev_no": 0,
+            "bus_address": "PCI\\VEN_10DE&DEV_1AEF",
+            "vendor_id": "0x10de",
+            "device_id": "0x1aef",
+            "driver_description": "High Definition Audio Controller",
+            "manufacturer": "Microsoft",
+            "current_link_speed": "8.0 GT/s PCIe",
+            "current_link_width": "4",
+        },
+        {
+            "dev_no": 1,
+            "bus_address": "PCI\\VEN_10DE&DEV_2204",
+            "vendor_id": "0x10de",
+            "device_id": "0x2204",
+            "driver_description": "NVIDIA GeForce RTX 3090",
+            "manufacturer": "NVIDIA",
+            "current_link_speed": "8.0 GT/s PCIe",
+            "current_link_width": "4",
+        }
+    ]
+
+    info = get_nvml_gpu_static_info(pcie_devices=pcie_devices)
+
+    assert info["hardware"]["gpus"] == [
+        {
+            "dev_no": 0,
+            "bus_address": "0000:03:00.0",
+            "current_link_speed": "8.0 GT/s PCIe",
+            "current_link_width": "4",
+            "device_id": "0x2204",
+            "driver_description": "NVIDIA GeForce RTX 3090",
+            "driver_version": "595.97",
+            "lane_width": "x4",
+            "link_generation": "Gen3",
+            "manufacturer": "NVIDIA",
+            "name": "NVIDIA GeForce RTX 3090",
+            "vendor_id": "0x10de",
+        }
+    ]
+
+
+def test_deep_merge_matches_gpu_by_bus_address_before_index() -> None:
+    base: dict[str, object] = {
+        "hardware": {
+            "gpus": [
+                {"dev_no": 0, "bus_address": "0000:02:00.0", "name": "ASPEED"},
+                {"dev_no": 1, "bus_address": "0000:17:00.0", "name": "Device"},
+            ]
+        }
+    }
+    overlay = {
+        "hardware": {
+            "gpus": [
+                {
+                    "bus_address": "0000:17:00.0",
+                    "driver_version": "580.95.05",
+                    "name": "NVIDIA RTX Test",
+                }
+            ]
+        }
+    }
+
+    _deep_merge(base, overlay)
+
+    gpus = base["hardware"]["gpus"]
+    assert gpus == [
+        {"dev_no": 0, "bus_address": "0000:02:00.0", "name": "ASPEED"},
+        {
+            "dev_no": 1,
+            "bus_address": "0000:17:00.0",
+            "name": "NVIDIA RTX Test",
+            "driver_version": "580.95.05",
+        },
+    ]
 
 
 def test_get_python_package_version_reads_module_version(monkeypatch) -> None:
@@ -407,7 +615,7 @@ def test_get_pcie_static_info_can_include_all_devices(monkeypatch, tmp_path) -> 
     assert len(cast(list[dict[str, object]], hardware["pcie_devices"])) == 2
 
 
-def test_get_pcie_static_info_keeps_gpu_and_accelerator_devices(
+def test_get_pcie_static_info_keeps_raw_gpu_only_when_all_devices_requested(
     monkeypatch, tmp_path
 ) -> None:
     sysfs = tmp_path / "pci"
@@ -441,10 +649,7 @@ def test_get_pcie_static_info_keeps_gpu_and_accelerator_devices(
         "0000_02_00.0",
         "0000_03_00.0",
     ]
-    assert [
-        device["bus_address"]
-        for device in cast(list[dict[str, object]], hardware["gpus"])
-    ] == ["0000_01_00.0"]
+    assert "gpus" not in hardware
     assert "npus" not in hardware
 
 
@@ -468,12 +673,7 @@ def test_get_pcie_static_info_omits_raw_devices_by_default(
 
     info = get_pcie_static_info()
 
-    hardware = cast(dict[str, object], info["hardware"])
-    assert "pcie_devices" not in hardware
-    assert [
-        device["bus_address"]
-        for device in cast(list[dict[str, object]], hardware["gpus"])
-    ] == ["0000_01_00.0"]
+    assert info == {}
 
 
 def test_parse_windows_active_power_scheme_english_output() -> None:

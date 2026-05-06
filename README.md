@@ -112,7 +112,7 @@ mblt-tracker collect --pcie-vendor-id 1ed5 --pcie-device-id 0100
 mblt-tracker collect --pcie-class-filter 0x12
 ```
 
-The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and PCIe information. On Linux, PCIe information is read from sysfs. On Windows, PCI devices are collected through PowerShell/CIM/PnP queries.
+The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU, NPU, driver, and PCIe information. NVIDIA GPU entries are sourced from NVML and enriched with PCIe metadata where available. On Linux, PCIe information is read from sysfs. On Windows, PCI devices are collected through PowerShell/CIM/PnP queries.
 
 ### Example Output
 
@@ -130,7 +130,7 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 15061708800,
+      "available_bytes": 14011174912,
       "dimms": [
         {
           "capacity_bytes": 17179869184,
@@ -160,22 +160,22 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
     },
     "gpus": [
       {
-        "bus_address": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
+        "bus_address": "0000:03:00.0",
         "current_link_speed": "8.0 GT/s PCIe",
         "current_link_width": "4",
         "dev_no": 0,
-        "device_id": "0x2204",
-        "driver_date": "/Date(1773705600000)/",
-        "driver_description": "NVIDIA GeForce RTX 3090",
-        "driver_provider": "NVIDIA",
-        "driver_version": "32.0.15.9597",
+        "device_id": "0x1aef",
+        "driver_date": "/Date(1774051200000)/",
+        "driver_description": "High Definition Audio Controller",
+        "driver_provider": "Microsoft",
+        "driver_version": "595.97",
         "lane_width": "x4",
         "link_generation": "Gen3",
-        "manufacturer": "NVIDIA",
+        "manufacturer": "Microsoft",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "16",
         "name": "NVIDIA GeForce RTX 3090",
-        "pnp_device_id": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
+        "pnp_device_id": "PCI\\VEN_10DE&DEV_1AEF&SUBSYS_145410DE&REV_A1\\4&126C804A&0&01E0",
         "revision": "0xa1",
         "status": "OK",
         "subsystem_device_id": "0x1454",
@@ -218,6 +218,14 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
     "cuda": {
       "version": "not_found"
     },
+    "gpu": {
+      "cuda_driver": {
+        "version": "13.2"
+      },
+      "driver": {
+        "version": "595.97"
+      }
+    },
     "npu_driver_version": "1.8.1.1348",
     "os": {
       "kernel_version": "11",
@@ -238,74 +246,157 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
 
 ```bash
 $ mblt-tracker collect
-[sudo] password for dmidecode: 
+[sudo] password for dmidecode:
 {
   "hardware": {
     "cpu": {
       "architecture": "x86_64",
-      "logical_cores": 20,
-      "model_name": "13th Gen Intel(R) Core(TM) i5-13600K",
-      "physical_cores": 14,
+      "logical_cores": 96,
+      "model_name": "INTEL(R) XEON(R) GOLD 6542Y",
+      "physical_cores": 48,
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 27351511040,
+      "available_bytes": 326333992960,
       "dimms": [
         {
-          "capacity_bytes": 17179869184,
+          "capacity_bytes": 68719476736,
           "configured_speed_mhz": 4800,
           "data_width_bits": 64,
-          "manufacturer": "G Skill Intl",
-          "part_number": "F5-6000J3040F16G",
-          "serial_number": "5D5D31F7",
+          "manufacturer": "Samsung",
+          "part_number": "M321R8GA0BB0-CQKZJ",
+          "serial_number": "80CE01233104F96929",
           "speed_mhz": 4800,
-          "total_width_bits": 64,
+          "total_width_bits": 80,
           "type": "DDR5"
         },
         {
-          "capacity_bytes": 17179869184,
+          "capacity_bytes": 68719476736,
           "configured_speed_mhz": 4800,
           "data_width_bits": 64,
-          "manufacturer": "G Skill Intl",
-          "part_number": "F5-6000J3040F16G",
-          "serial_number": "6154BFF9",
+          "manufacturer": "Samsung",
+          "part_number": "M321R8GA0BB0-CQKZJ",
+          "serial_number": "80CE01232804E78C2F",
           "speed_mhz": 4800,
-          "total_width_bits": 64,
+          "total_width_bits": 80,
+          "type": "DDR5"
+        },
+        {
+          "capacity_bytes": 68719476736,
+          "configured_speed_mhz": 4800,
+          "data_width_bits": 64,
+          "manufacturer": "Samsung",
+          "part_number": "M321R8GA0BB0-CQKZJ",
+          "serial_number": "80CE01232804E78A42",
+          "speed_mhz": 4800,
+          "total_width_bits": 80,
+          "type": "DDR5"
+        },
+        {
+          "capacity_bytes": 68719476736,
+          "configured_speed_mhz": 4800,
+          "data_width_bits": 64,
+          "manufacturer": "Samsung",
+          "part_number": "M321R8GA0BB0-CQKZJ",
+          "serial_number": "80CE01232804E78C30",
+          "speed_mhz": 4800,
+          "total_width_bits": 80,
+          "type": "DDR5"
+        },
+        {
+          "capacity_bytes": 68719476736,
+          "configured_speed_mhz": 4800,
+          "data_width_bits": 64,
+          "manufacturer": "Samsung",
+          "part_number": "M321R8GA0BB0-CQKZJ",
+          "serial_number": "80CE01232804E65B3B",
+          "speed_mhz": 4800,
+          "total_width_bits": 80,
+          "type": "DDR5"
+        },
+        {
+          "capacity_bytes": 68719476736,
+          "configured_speed_mhz": 4800,
+          "data_width_bits": 64,
+          "manufacturer": "Samsung",
+          "part_number": "M321R8GA0BB0-CQKZJ",
+          "serial_number": "80CE01232804E78A46",
+          "speed_mhz": 4800,
+          "total_width_bits": 80,
           "type": "DDR5"
         }
       ],
-      "theoretical_bandwidth_gbps": 76.8,
-      "total_bytes": 33379598336
+      "theoretical_bandwidth_gbps": 230.4,
+      "total_bytes": 405389791232
     },
+    "gpus": [
+      {
+        "bus_address": "0000:17:00.0",
+        "class": "0x030000",
+        "current_link_speed": "2.5 GT/s PCIe",
+        "current_link_width": "16",
+        "dev_no": 0,
+        "device_id": "0x2bb1",
+        "driver_version": "580.95.05",
+        "lane_width": "x16",
+        "link_generation": "Gen1",
+        "manufacturer": "NVIDIA Corporation",
+        "max_link_speed": "32.0 GT/s PCIe",
+        "max_link_width": "16",
+        "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+        "revision": "0xa1",
+        "subsystem_device_id": "0x204b",
+        "subsystem_vendor_id": "0x10de",
+        "vendor_id": "0x10de"
+      },
+      {
+        "bus_address": "0000:e1:00.0",
+        "class": "0x030000",
+        "current_link_speed": "2.5 GT/s PCIe",
+        "current_link_width": "16",
+        "dev_no": 1,
+        "device_id": "0x2bb1",
+        "driver_version": "580.95.05",
+        "lane_width": "x16",
+        "link_generation": "Gen1",
+        "manufacturer": "NVIDIA Corporation",
+        "max_link_speed": "32.0 GT/s PCIe",
+        "max_link_width": "16",
+        "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+        "revision": "0xa1",
+        "subsystem_device_id": "0x204b",
+        "subsystem_vendor_id": "0x10de",
+        "vendor_id": "0x10de"
+      }
+    ],
     "npus": [
       {
         "board_name": "aries0",
-        "bus_address": "0000:01:00.0",
+        "bus_address": "0000:bd:00.0",
         "class": "0x078000",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
         "dev_no": 0,
         "device_id": "0x0000",
-        "driver_name": "aries",
         "firmware": {
-          "version": "1.2.4"
+          "version": "fb9a5980"
         },
         "lane_width": "x8",
         "link_generation": "Gen4",
-        "manufacturer": "MOBILINT, Inc.",
+        "manufacturer": "Mobilint, Inc.",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
-        "name": "MOBILINT NPU Accelerator",
+        "name": "Aries",
         "revision": "0x02",
         "subsystem_device_id": "0x1093",
-        "subsystem_vendor_id": "0x0402",
+        "subsystem_vendor_id": "0x0401",
         "vendor_id": "0x209f"
       }
     ]
   },
   "inference": {
     "cpu": {
-      "governor": "powersave",
+      "governor": "schedutil",
       "max_processor_state_pct": null,
       "min_processor_state_pct": null,
       "power_plan": null
@@ -313,14 +404,18 @@ $ mblt-tracker collect
     "cuda": {
       "version": "12.8"
     },
-    "driver": {
-      "aries_version": "1.12.0",
-      "regulus_version": "N/A"
+    "gpu": {
+      "cuda_driver": {
+        "version": "13.0"
+      },
+      "driver": {
+        "version": "580.95.05"
+      }
     },
     "os": {
-      "kernel_version": "6.17.0-23-generic",
+      "kernel_version": "6.8.0-110-generic",
       "name": "Linux",
-      "version": "Ubuntu 24.04.4 LTS"
+      "version": "Ubuntu 24.04 LTS"
     },
     "qbcompiler": {
       "version": "not_installed"
@@ -372,7 +467,7 @@ Uses **NVML** (via `nvidia-ml-py`) for high-fidelity hardware monitoring.
 - **Features**: Tracks total system GPU usage or specific indices (e.g., `GPUDeviceTracker(gpu_id=[0, 1])`).
 - **Dependencies**: Requires NVIDIA Drivers and NVML library installed.
 - **Temperature**: Reads on-die GPU temperature through NVML.
-- **Static Info**: Reports GPU count, selected device names, NVIDIA driver version, and CUDA driver version.
+- **Static Info**: Reports NVML-discovered GPU devices, NVIDIA driver version, CUDA driver version, and PCIe link/device metadata when available.
 
 ### Mobilint NPU
 
@@ -451,8 +546,8 @@ Typical fields include:
 - `hardware.host.dram.dimms`: physical DIMM metadata from `dmidecode` when available. On Linux, sudo password is required.
 - `inference.os`: OS name, version, and kernel version
 - `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
-- `hardware.pcie.npus` / `hardware.pcie.gpus`: categorized PCIe accelerators, including vendor/device IDs and link information where available
-- `hardware.gpu`: GPU count and device names from NVML
+- `hardware.gpus`: NVML-discovered NVIDIA GPU devices enriched with PCIe vendor/device IDs and link information where available
+- `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, link information, and firmware metadata where available
 - `inference.gpu`: NVIDIA driver and CUDA driver versions
 - `hardware.npus[].firmware`: per-NPU firmware metadata where available. Linux currently maps `mobilint-cli status` firmware rows by device order.
 - `inference.driver`: host Mobilint driver metadata parsed from `mobilint-cli status` or OS driver sources.
