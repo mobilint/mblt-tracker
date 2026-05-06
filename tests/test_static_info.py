@@ -594,6 +594,24 @@ def test_get_pcie_static_info_reads_linux_revision_driver_and_known_names(
     assert info["inference"]["npu_driver_version"] == "1.8.1"
 
 
+def test_get_pcie_static_info_keeps_nested_firmware_metadata() -> None:
+    info = get_pcie_static_info(
+        devices=[
+            {
+                "bus_address": "PCI\\VEN_209F&DEV_0000",
+                "vendor_id": "0x209f",
+                "device_id": "0x0000",
+                "name": "MOBILINT NPU Accelerator",
+                "firmware": {"version": "2.0.3"},
+            }
+        ]
+    )
+
+    hardware = cast(dict[str, object], info["hardware"])
+    npu_info = cast(list[dict[str, object]], hardware["npus"])[0]
+    assert npu_info["firmware"] == {"version": "2.0.3"}
+
+
 def test_lspci_metadata_parses_machine_readable_output(monkeypatch) -> None:
     output = '0000:01:00.0 "3D controller [0302]" "NVIDIA Corporation [10de]" "AD102 [GeForce RTX 4090] [2684]"\n'
     monkeypatch.setattr(static_info, "run_command", lambda _command: output)
@@ -861,6 +879,29 @@ def test_read_windows_pci_link_properties_includes_driver_and_firmware_metadata(
     assert device["firmware"] == {"version": "2.0.3"}
     assert "firmware_version" not in device
     assert "firmware_revision" not in device
+
+
+def test_read_windows_pci_link_properties_enumerates_all_pci_without_instance_wildcard(
+    monkeypatch,
+) -> None:
+    commands = []
+
+    def fake_run_command_with_timeout(command, timeout):
+        commands.append(command)
+        return "[]"
+
+    monkeypatch.setattr(
+        static_info,
+        "run_command_with_timeout",
+        fake_run_command_with_timeout,
+    )
+
+    assert _read_windows_pci_link_properties(None) == {}
+
+    powershell_command = commands[0][-1]
+    assert "Get-PnpDevice -InstanceId 'PCI\\*'" not in powershell_command
+    assert "Get-PnpDevice | Where-Object" in powershell_command
+    assert "-like 'PCI\\*'" in powershell_command
 
 
 def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> None:

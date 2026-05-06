@@ -980,7 +980,7 @@ def _read_windows_pci_link_properties(
     previous all-PCI behavior for tests and fallback callers.
     """
     if instance_ids is None:
-        device_expression = "Get-PnpDevice -InstanceId 'PCI\\*'"
+        device_expression = "Get-PnpDevice | Where-Object { $_.InstanceId -like 'PCI\\*' }"
     elif not instance_ids:
         return {}
     else:
@@ -1374,6 +1374,7 @@ def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, obj
         "driver_date",
         "driver_description",
         "driver_provider",
+        "firmware",
         "firmware_version",
         "firmware_revision",
         "current_link_speed",
