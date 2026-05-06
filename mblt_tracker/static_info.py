@@ -8,6 +8,7 @@ import shlex
 import subprocess
 from importlib import metadata
 from pathlib import Path
+from typing import Any, Mapping, Sequence, cast
 
 import psutil
 
@@ -15,6 +16,7 @@ from ._types import (
     STATIC_INFO_CHILD_SCHEMAS,
     CollectOutput,
     CpuPowerPolicy,
+    DimmInfo,
 )
 
 
@@ -27,6 +29,8 @@ def get_host_static_info(sudo_password: str | None = None) -> CollectOutput:
                 "architecture": platform.machine(),
                 "physical_cores": psutil.cpu_count(logical=False),
                 "logical_cores": psutil.cpu_count(logical=True),
+                "model_name": None,
+                "vendor": None,
             },
             "dram": {
                 "total_bytes": virtual_memory.total,
@@ -34,11 +38,20 @@ def get_host_static_info(sudo_password: str | None = None) -> CollectOutput:
             },
         },
         "inference": {
+            "cpu": {
+                "governor": None,
+                "power_plan": None,
+                "min_processor_state_pct": None,
+                "max_processor_state_pct": None,
+            },
+            "cuda": {"version": None},
             "os": {
                 "name": platform.system(),
                 "version": platform.version(),
                 "kernel_version": platform.release(),
-            }
+            },
+            "qbcompiler": {"version": None},
+            "qbruntime": {"version": None},
         },
     }
 
@@ -48,10 +61,11 @@ def get_host_static_info(sudo_password: str | None = None) -> CollectOutput:
         model_name, vendor = _linux_cpu_identity()
     if model_name is None:
         model_name = platform.processor() or platform.uname().processor
+    cpu_info = info["hardware"]["cpu"]
     if model_name:
-        info["hardware"]["cpu"]["model_name"] = model_name
+        cpu_info["model_name"] = model_name
     if vendor:
-        info["hardware"]["cpu"]["vendor"] = vendor
+        cpu_info["vendor"] = vendor
 
     if platform.system() == "Windows":
         dimms = _read_dram_dimms_windows()
@@ -61,7 +75,7 @@ def get_host_static_info(sudo_password: str | None = None) -> CollectOutput:
         dimms = []
     if dimms:
         dram = info["hardware"]["dram"]
-        dram["dimms"] = dimms
+        dram["dimms"] = cast(list[DimmInfo], dimms)
         theoretical_bandwidth_gbps = _calculate_theoretical_bandwidth_gbps(dimms)
         if theoretical_bandwidth_gbps is not None:
             dram["theoretical_bandwidth_gbps"] = theoretical_bandwidth_gbps
@@ -89,7 +103,7 @@ def get_host_static_info(sudo_password: str | None = None) -> CollectOutput:
         "version": _get_python_package_version("qbcompiler") or "not_installed"
     }
 
-    return _clean_typed_dict(info, CollectOutput)
+    return cast(CollectOutput, _clean_typed_dict(info, CollectOutput))
 
 
 def get_cpu_power_policy() -> CpuPowerPolicy:
@@ -237,7 +251,10 @@ def get_windows_power_policy() -> CpuPowerPolicy:
 
     if scheme_guid is not None:
         processor_states = _read_windows_processor_power_states(scheme_guid)
-        policy.update(processor_states)
+        if "min_processor_state_pct" in processor_states:
+            policy["min_processor_state_pct"] = processor_states["min_processor_state_pct"]
+        if "max_processor_state_pct" in processor_states:
+            policy["max_processor_state_pct"] = processor_states["max_processor_state_pct"]
 
     return policy
 
@@ -436,7 +453,13 @@ def parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
         status_output,
     )
     if driver_match is not None:
-        info.setdefault("inference", {})["npu_driver_version"] = driver_match.group(1)
+        inference = info.setdefault("inference", {})
+        if isinstance(inference, dict):
+            inference["npu_driver_version"] = driver_match.group(1)
+            inference["driver"] = {
+                "aries_version": driver_match.group(1),
+                "regulus_version": driver_match.group(2),
+            }
     device_matches = re.findall(
         r"\|\s*(\d+)\s+([A-Za-z0-9_-]+)\(([^)]+)\).*?\|", status_output
     )
@@ -453,7 +476,9 @@ def parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
             if idx < len(firmware_matches):
                 device["firmware"] = {"version": firmware_matches[idx]}
             devices.append(device)
-        info.setdefault("hardware", {})["npus"] = devices
+        hardware: dict[str, object] = {}
+        info["hardware"] = hardware
+        hardware["npus"] = devices
     return info
 
 
@@ -498,7 +523,7 @@ def _parse_dmidecode_section_fields(section: str) -> dict[str, str]:
 
 
 def _calculate_theoretical_bandwidth_gbps(
-    dimms: list[dict[str, object]],
+    dimms: Sequence[Mapping[str, object]],
 ) -> float | None:
     """Estimate peak DRAM bandwidth in GB/s from DIMM speed and data width."""
     bandwidth_gbps = 0.0
@@ -759,7 +784,12 @@ def _read_windows_pci_link_properties(
             "'DEVPKEY_PciDevice_CurrentLinkWidth',"
             "'DEVPKEY_PciDevice_MaxLinkSpeed',"
             "'DEVPKEY_PciDevice_MaxLinkWidth',"
-            "'DEVPKEY_Device_DriverVersion'"
+            "'DEVPKEY_Device_DriverVersion',"
+            "'DEVPKEY_Device_DriverDate',"
+            "'DEVPKEY_Device_DriverDesc',"
+            "'DEVPKEY_Device_DriverProvider',"
+            "'DEVPKEY_Device_FirmwareVersion',"
+            "'DEVPKEY_Device_FirmwareRevision'"
             "); "
             f"{device_expression} | "
             "ForEach-Object { "
@@ -817,9 +847,37 @@ def _read_windows_pci_link_properties(
         driver_version = _clean_windows_device_property(
             entry.get("DEVPKEY_Device_DriverVersion")
         )
+        driver_date = _clean_windows_device_property(
+            entry.get("DEVPKEY_Device_DriverDate")
+        )
+        driver_description = _clean_windows_device_property(
+            entry.get("DEVPKEY_Device_DriverDesc")
+        )
+        driver_provider = _clean_windows_device_property(
+            entry.get("DEVPKEY_Device_DriverProvider")
+        )
+        firmware_version = _clean_windows_device_property(
+            entry.get("DEVPKEY_Device_FirmwareVersion")
+        )
+        firmware_revision = _clean_windows_device_property(
+            entry.get("DEVPKEY_Device_FirmwareRevision")
+        )
 
         if driver_version is not None:
             device_properties["driver_version"] = driver_version
+        if driver_date is not None:
+            device_properties["driver_date"] = driver_date
+        if driver_description is not None:
+            device_properties["driver_description"] = driver_description
+        if driver_provider is not None:
+            device_properties["driver_provider"] = driver_provider
+        firmware: dict[str, object] = {}
+        if firmware_version is not None:
+            firmware["version"] = firmware_version
+        elif firmware_revision is not None:
+            firmware["version"] = firmware_revision
+        if firmware:
+            device_properties["firmware"] = firmware
 
         if device_properties:
             properties[instance_id.upper()] = device_properties
@@ -839,7 +897,10 @@ def get_windows_npu_driver_firmware_info(
         return {}
 
     pcie_info = get_pcie_static_info()
-    npus = pcie_info.get("hardware", {}).get("npus", [])
+    hardware = pcie_info.get("hardware", {})
+    if not isinstance(hardware, dict):
+        return {}
+    npus = hardware.get("npus", [])
     if not isinstance(npus, list):
         return {}
 
@@ -880,6 +941,8 @@ def _clean_windows_device_property(value: object) -> str | None:
 
 
 def _windows_link_speed_to_text(value: object) -> str | None:
+    if not isinstance(value, (int, str)):
+        return None
     try:
         speed = int(value)
     except (TypeError, ValueError):
@@ -1061,9 +1124,11 @@ def _find_all_npu_devices(
             str(device.get("device_id", ""))
         ) != normalized_device_id:
             continue
-        if normalized_class_filter is not None and not _normalize_hex(
-            str(device.get("class", ""))
-        ).startswith(normalized_class_filter):
+        device_class = _normalize_hex(str(device.get("class", "")))
+        if (
+            normalized_class_filter is not None
+            and (device_class is None or not device_class.startswith(normalized_class_filter))
+        ):
             continue
         matched.append(device)
     return matched
@@ -1088,6 +1153,12 @@ def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, obj
         "pnp_device_id",
         "revision",
         "driver_version",
+        "driver_name",
+        "driver_date",
+        "driver_description",
+        "driver_provider",
+        "firmware_version",
+        "firmware_revision",
         "current_link_speed",
         "current_link_width",
         "max_link_speed",
@@ -1208,9 +1279,11 @@ def _normalize_hex(value: str | None) -> str | None:
 
 
 def _deep_merge(
-    base: dict[str, object], overlay: dict[str, object]
-) -> dict[str, object]:
+    base: dict[str, object] | object, overlay: dict[str, object] | object
+) -> dict[str, object] | object:
     """Recursively merge nested dictionaries and return ``base``."""
+    if not isinstance(base, dict) or not isinstance(overlay, dict):
+        return base
     for key, value in overlay.items():
         existing = base.get(key)
         if key in {"npus", "gpus", "pcie_devices"} and isinstance(existing, list) and isinstance(value, list):
@@ -1249,7 +1322,9 @@ def _clean_typed_dict(value: object, schema: object | None = None) -> object:
     """Remove None from optional fields while preserving required schema keys."""
     if isinstance(value, dict):
         required_keys = getattr(schema, "__required_keys__", frozenset())
-        child_schemas = STATIC_INFO_CHILD_SCHEMAS.get(schema, {}) if isinstance(schema, type) else {}
+        child_schemas = (
+            STATIC_INFO_CHILD_SCHEMAS.get(schema, {}) if isinstance(schema, type) else {}
+        )
         cleaned: dict[str, object] = {}
         for key, item in value.items():
             child_schema = child_schemas.get(key)
@@ -1321,19 +1396,20 @@ def _windows_cpu_identity() -> tuple[str | None, str | None]:
         import winreg
     except ImportError:
         return None, None
+    winreg_module = cast(Any, winreg)
 
     try:
-        with winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE,
+        with winreg_module.OpenKey(
+            winreg_module.HKEY_LOCAL_MACHINE,
             r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
         ) as key:
             model_name = _read_windows_registry_string(
-                winreg,
+                winreg_module,
                 key,
                 "ProcessorNameString",
             )
             vendor = _read_windows_registry_string(
-                winreg,
+                winreg_module,
                 key,
                 "VendorIdentifier",
             )
@@ -1344,7 +1420,7 @@ def _windows_cpu_identity() -> tuple[str | None, str | None]:
 
 def _read_windows_registry_string(winreg_module: object, key: object, name: str) -> str | None:
     try:
-        value, _value_type = winreg_module.QueryValueEx(key, name)
+        value, _value_type = cast(Any, winreg_module).QueryValueEx(key, name)
     except OSError:
         return None
     if not isinstance(value, str):

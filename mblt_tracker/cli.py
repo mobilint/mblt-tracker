@@ -6,7 +6,7 @@ import json
 import platform
 import sys
 from pathlib import Path
-from typing import Optional, Sequence, TextIO
+from typing import Any, Mapping, Optional, Sequence, TextIO, cast
 
 from ._types import CollectOutput
 from .static_info import (
@@ -27,7 +27,7 @@ def collect_static_info(
     sudo_password: Optional[str] = None,
 ) -> CollectOutput:
     """Collect best-effort static host and PCIe information."""
-    info = get_host_static_info(sudo_password=sudo_password)
+    info = cast(dict[str, object], get_host_static_info(sudo_password=sudo_password))
     _deep_merge(
         info,
         get_pcie_static_info(
@@ -39,7 +39,7 @@ def collect_static_info(
     )
     _deep_merge(info, get_windows_npu_driver_firmware_info())
     _deep_merge(info, get_linux_npu_driver_firmware_info())
-    return _clean_typed_dict(info, CollectOutput)
+    return cast(CollectOutput, _clean_typed_dict(info, CollectOutput))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,8 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _write_json(info: dict[str, object], output: Optional[Path], stdout: TextIO) -> None:
-    text = json.dumps(info, indent=2, sort_keys=True) + "\n"
+def _write_json(info: Mapping[str, object], output: Optional[Path], stdout: TextIO) -> None:
+    text = json.dumps(cast(Any, info), indent=2, sort_keys=True) + "\n"
     if output is None:
         stdout.write(text)
         return

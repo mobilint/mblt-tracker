@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import types
+from typing import cast
 
 import mblt_tracker.static_info as static_info
 from mblt_tracker.static_info import (
@@ -301,8 +302,9 @@ def test_get_pcie_static_info_reads_sysfs_and_selects_matching_device(
 
     info = get_pcie_static_info(vendor_id="1ed5", device_id="0100")
 
-    assert "pcie_devices" not in info["hardware"]
-    npus = info["hardware"]["npus"]
+    hardware = cast(dict[str, object], info["hardware"])
+    assert "pcie_devices" not in hardware
+    npus = cast(list[dict[str, object]], hardware["npus"])
     assert len(npus) == 2
     assert npus[0]["dev_no"] == 0
     assert npus[0]["bus_address"] == "0000_01_00.0"
@@ -341,7 +343,8 @@ def test_get_pcie_static_info_reads_linux_revision_driver_and_known_names(
 
     info = get_pcie_static_info()
 
-    npu_info = info["hardware"]["npus"][0]
+    hardware = cast(dict[str, object], info["hardware"])
+    npu_info = cast(list[dict[str, object]], hardware["npus"])[0]
     assert npu_info["name"] == "MOBILINT NPU Accelerator"
     assert npu_info["manufacturer"] == "MOBILINT, Inc."
     assert npu_info["revision"] == "0x02"
@@ -400,7 +403,8 @@ def test_get_pcie_static_info_can_include_all_devices(monkeypatch, tmp_path) -> 
 
     info = get_pcie_static_info(include_all_devices=True)
 
-    assert len(info["hardware"]["pcie_devices"]) == 2
+    hardware = cast(dict[str, object], info["hardware"])
+    assert len(cast(list[dict[str, object]], hardware["pcie_devices"])) == 2
 
 
 def test_get_pcie_static_info_keeps_gpu_and_accelerator_devices(
@@ -428,13 +432,19 @@ def test_get_pcie_static_info_keeps_gpu_and_accelerator_devices(
 
     info = get_pcie_static_info(include_all_devices=True)
 
-    hardware = info["hardware"]
-    assert [device["bus_address"] for device in hardware["pcie_devices"]] == [
+    hardware = cast(dict[str, object], info["hardware"])
+    assert [
+        device["bus_address"]
+        for device in cast(list[dict[str, object]], hardware["pcie_devices"])
+    ] == [
         "0000_01_00.0",
         "0000_02_00.0",
         "0000_03_00.0",
     ]
-    assert [device["bus_address"] for device in hardware["gpus"]] == ["0000_01_00.0"]
+    assert [
+        device["bus_address"]
+        for device in cast(list[dict[str, object]], hardware["gpus"])
+    ] == ["0000_01_00.0"]
     assert "npus" not in hardware
 
 
@@ -458,9 +468,12 @@ def test_get_pcie_static_info_omits_raw_devices_by_default(
 
     info = get_pcie_static_info()
 
-    hardware = info["hardware"]
+    hardware = cast(dict[str, object], info["hardware"])
     assert "pcie_devices" not in hardware
-    assert [device["bus_address"] for device in hardware["gpus"]] == ["0000_01_00.0"]
+    assert [
+        device["bus_address"]
+        for device in cast(list[dict[str, object]], hardware["gpus"])
+    ] == ["0000_01_00.0"]
 
 
 def test_parse_windows_active_power_scheme_english_output() -> None:
@@ -582,7 +595,7 @@ def test_get_cpu_power_policy_keeps_os_independent_shape(monkeypatch) -> None:
     }
 
 
-def test_read_windows_pci_link_properties_includes_driver_version_metadata(
+def test_read_windows_pci_link_properties_includes_driver_and_firmware_metadata(
     monkeypatch,
 ) -> None:
     instance_id = "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008"
@@ -590,6 +603,11 @@ def test_read_windows_pci_link_properties_includes_driver_version_metadata(
         {
             "InstanceId": instance_id,
             "DEVPKEY_Device_DriverVersion": "1.8.1.1348",
+            "DEVPKEY_Device_DriverDate": "/Date(1774828800000)/",
+            "DEVPKEY_Device_DriverDesc": "MOBILINT NPU Accelerator",
+            "DEVPKEY_Device_DriverProvider": "MOBILINT, Inc.",
+            "DEVPKEY_Device_FirmwareVersion": None,
+            "DEVPKEY_Device_FirmwareRevision": "2.0.3",
         }
     )
 
@@ -603,6 +621,12 @@ def test_read_windows_pci_link_properties_includes_driver_version_metadata(
 
     device = properties[instance_id]
     assert device["driver_version"] == "1.8.1.1348"
+    assert device["driver_date"] == "/Date(1774828800000)/"
+    assert device["driver_description"] == "MOBILINT NPU Accelerator"
+    assert device["driver_provider"] == "MOBILINT, Inc."
+    assert device["firmware"] == {"version": "2.0.3"}
+    assert "firmware_version" not in device
+    assert "firmware_revision" not in device
 
 
 def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> None:
@@ -628,7 +652,8 @@ def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> 
 
     info = get_windows_npu_driver_firmware_info()
 
-    assert info["hardware"]["npus"] == [
+    hardware = cast(dict[str, object], info["hardware"])
+    assert hardware["npus"] == [
         {
             "dev_no": 0,
             "vendor_id": "0x209f",

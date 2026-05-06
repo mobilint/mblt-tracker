@@ -187,6 +187,13 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
         "current_link_width": "8",
         "dev_no": 0,
         "device_id": "0x0000",
+        "driver_date": "/Date(1774828800000)/",
+        "driver_description": "MOBILINT NPU Accelerator",
+        "driver_provider": "MOBILINT, Inc.",
+        "driver_version": "1.8.1.1348",
+        "firmware": {
+          "version": "2.0.3"
+        },
         "lane_width": "x8",
         "link_generation": "Gen4",
         "manufacturer": "MOBILINT, Inc.",
@@ -211,6 +218,10 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
     },
     "cuda": {
       "version": "not_found"
+    },
+    "driver": {
+      "aries_version": "1.12.0",
+      "regulus_version": "N/A"
     },
     "npu_driver_version": "1.8.1.1348",
     "os": {
@@ -444,11 +455,12 @@ Typical fields include:
 - `hardware.host.dram`: total and available memory in bytes
 - `hardware.host.dram.dimms`: physical DIMM metadata from `dmidecode` when available. On Linux, sudo password is required.
 - `inference.os`: OS name, version, and kernel version
-- `inference.cpu.governor`: Linux CPU frequency governor, when available
+- `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
 - `hardware.pcie.npus` / `hardware.pcie.gpus`: categorized PCIe accelerators, including vendor/device IDs and link information where available
 - `hardware.gpu`: GPU count and device names from NVML
 - `inference.gpu`: NVIDIA driver and CUDA driver versions
-- `hardware.npu`, `inference.driver`, `inference.firmware`: Mobilint metadata parsed from `mobilint-cli status`
+- `hardware.npus[].firmware`: per-NPU firmware metadata where available. Linux currently maps `mobilint-cli status` firmware rows by device order.
+- `inference.driver`: host Mobilint driver metadata parsed from `mobilint-cli status` or OS driver sources.
 
 PCIe discovery supports:
 
