@@ -6,7 +6,6 @@ import platform
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 import psutil
 
@@ -36,7 +35,10 @@ def get_host_static_info() -> dict[str, object]:
         },
     }
 
-    model_name, vendor = _linux_cpu_identity()
+    if platform.system() == "Windows":
+        model_name, vendor = _windows_cpu_identity()
+    else:
+        model_name, vendor = _linux_cpu_identity()
     if model_name is None:
         model_name = platform.processor() or platform.uname().processor
     if model_name:
@@ -52,11 +54,15 @@ def get_host_static_info() -> dict[str, object]:
         governor = get_cpu_governor()
         if governor is not None:
             info["inference"]["cpu"] = {"governor": governor}
+    elif platform.system() == "Windows":
+        power_policy = get_windows_power_policy()
+        if power_policy:
+            info["inference"]["cpu"] = power_policy
 
     return _remove_none_values(info)
 
 
-def get_cpu_governor() -> Optional[str]:
+def get_cpu_governor() -> str | None:
     """Return CPU frequency governor values as a compact string on Linux."""
     governors = []
     cpu_root = Path("/sys/devices/system/cpu")
@@ -75,10 +81,140 @@ def get_cpu_governor() -> Optional[str]:
     return ",".join(unique)
 
 
+def get_windows_power_policy() -> dict[str, object]:
+    """Return active Windows power policy information.
+
+    Windows does not expose Linux-style CPU frequency governors. Instead, the
+    active power plan and processor state limits are returned using Windows
+    native terminology.
+    """
+    active_scheme_output = run_command(["powercfg", "/getactivescheme"])
+    if active_scheme_output is None:
+        return {}
+
+    scheme_guid, power_plan = _parse_windows_active_power_scheme(
+        active_scheme_output
+    )
+    if scheme_guid is None and power_plan is None:
+        return {}
+
+    policy: dict[str, object] = {}
+    if power_plan is not None:
+        policy["power_plan"] = _normalize_windows_power_plan_name(
+            scheme_guid,
+            power_plan,
+        )
+
+    if scheme_guid is not None:
+        processor_states = _read_windows_processor_power_states(scheme_guid)
+        policy.update(processor_states)
+
+    return policy
+
+
+def _normalize_windows_power_plan_name(
+    scheme_guid: str | None,
+    power_plan: str,
+) -> str:
+    """Return a stable English name for built-in Windows power plans.
+
+    ``powercfg`` localizes plan names based on the OS display language. The
+    built-in plan GUIDs are stable, so use them to keep tracker output
+    language-independent while preserving custom plan names as a fallback.
+    """
+    if scheme_guid is None:
+        return power_plan
+
+    built_in_power_plans = {
+        "381b4222-f694-41f0-9685-ff5bb260df2e": "Balanced",
+        "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c": "High performance",
+        "a1841308-3541-4fab-bc81-f71556f20b4a": "Power saver",
+        "e9a42b02-d5df-448d-aa00-03f14749eb61": "Ultimate Performance",
+    }
+    return built_in_power_plans.get(scheme_guid.lower(), power_plan)
+
+
+def _parse_windows_active_power_scheme(
+    output: str,
+) -> tuple[str | None, str | None]:
+    """Parse ``powercfg /getactivescheme`` output.
+
+    The surrounding text is localized by Windows, but the GUID and plan name in
+    parentheses are stable enough to parse across locales.
+    """
+    guid_match = re.search(
+        r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+        output,
+        re.IGNORECASE,
+    )
+    name_match = re.search(r"\(([^()]*)\)\s*$", output.strip())
+
+    scheme_guid = guid_match.group(1).lower() if guid_match is not None else None
+    power_plan = None
+    if name_match is not None:
+        value = name_match.group(1).strip()
+        power_plan = value or None
+    return scheme_guid, power_plan
+
+
+def _read_windows_processor_power_states(scheme_guid: str) -> dict[str, object]:
+    processor_subgroup_guid = "54533251-82be-4824-96c1-47b60b740d00"
+    min_processor_state_guid = "893dee8e-2bef-41e0-89c6-b55d0929964c"
+    max_processor_state_guid = "bc5038f7-23e0-4960-96da-33abaf5935ec"
+
+    values: dict[str, object] = {}
+    min_value = _read_windows_power_setting_ac_value(
+        scheme_guid,
+        processor_subgroup_guid,
+        min_processor_state_guid,
+    )
+    max_value = _read_windows_power_setting_ac_value(
+        scheme_guid,
+        processor_subgroup_guid,
+        max_processor_state_guid,
+    )
+    if min_value is not None:
+        values["min_processor_state_pct"] = min_value
+    if max_value is not None:
+        values["max_processor_state_pct"] = max_value
+    return values
+
+
+def _read_windows_power_setting_ac_value(
+    scheme_guid: str,
+    subgroup_guid: str,
+    setting_guid: str,
+) -> int | None:
+    output = run_command(
+        ["powercfg", "/query", scheme_guid, subgroup_guid, setting_guid]
+    )
+    if output is None:
+        return None
+    return _parse_windows_power_setting_ac_value(output)
+
+
+def _parse_windows_power_setting_ac_value(output: str) -> int | None:
+    """Parse an AC power setting value from ``powercfg /query`` output."""
+    match = re.search(
+        r"(?:Current AC Power Setting Index|현재\s*AC\s*전원\s*설정\s*인덱스)\s*:\s*0x([0-9a-f]+)",
+        output,
+        re.IGNORECASE,
+    )
+    if match is None:
+        match = re.search(r"AC[^\n\r]*:\s*0x([0-9a-f]+)", output, re.IGNORECASE)
+    if match is None:
+        return None
+
+    try:
+        return int(match.group(1), 16)
+    except ValueError:
+        return None
+
+
 def get_pcie_static_info(
-    vendor_id: Optional[str] = None,
-    device_id: Optional[str] = None,
-    class_filter: Optional[str] = None,
+    vendor_id: str | None = None,
+    device_id: str | None = None,
+    class_filter: str | None = None,
     include_all_devices: bool = False,
 ) -> dict[str, object]:
     """Collect best-effort PCIe information.
@@ -252,7 +388,7 @@ def _read_windows_pci_link_properties() -> dict[str, dict[str, object]]:
     return properties
 
 
-def _windows_link_speed_to_text(value: object) -> Optional[str]:
+def _windows_link_speed_to_text(value: object) -> str | None:
     try:
         speed = int(value)
     except (TypeError, ValueError):
@@ -269,11 +405,11 @@ def _windows_link_speed_to_text(value: object) -> Optional[str]:
     return speeds.get(speed)
 
 
-def _parse_windows_pci_id(pnp_device_id: str) -> Optional[dict[str, object]]:
+def _parse_windows_pci_id(pnp_device_id: str) -> dict[str, object] | None:
     if not pnp_device_id.upper().startswith("PCI\\"):
         return None
 
-    def match_hex(pattern: str) -> Optional[str]:
+    def match_hex(pattern: str) -> str | None:
         match = re.search(pattern, pnp_device_id, re.IGNORECASE)
         if match is None:
             return None
@@ -328,9 +464,9 @@ def _read_pcie_devices(sysfs_root: Path) -> list[dict[str, object]]:
 
 def _find_all_npu_devices(
     devices: list[dict[str, object]],
-    vendor_id: Optional[str],
-    device_id: Optional[str],
-    class_filter: Optional[str],
+    vendor_id: str | None,
+    device_id: str | None,
+    class_filter: str | None,
 ) -> list[dict[str, object]]:
     normalized_vendor_id = _normalize_hex(vendor_id)
     normalized_device_id = _normalize_hex(device_id)
@@ -457,7 +593,7 @@ def _is_likely_npu_device(device: dict[str, object]) -> bool:
     return "mobilint" in text or "npu" in text
 
 
-def _read_first_line(path: Path) -> Optional[str]:
+def _read_first_line(path: Path) -> str | None:
     try:
         value = path.read_text(encoding="utf-8").splitlines()[0].strip()
     except (OSError, IndexError):
@@ -465,7 +601,7 @@ def _read_first_line(path: Path) -> Optional[str]:
     return value or None
 
 
-def _normalize_hex(value: Optional[str]) -> Optional[str]:
+def _normalize_hex(value: str | None) -> str | None:
     if value is None:
         return None
     value = value.strip().lower()
@@ -501,7 +637,7 @@ def _remove_none_values(value: object) -> object:
     return value
 
 
-def _link_speed_to_generation(link_speed: str) -> Optional[str]:
+def _link_speed_to_generation(link_speed: str) -> str | None:
     match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*GT/s", link_speed, re.IGNORECASE)
     if match is None:
         return None
@@ -521,7 +657,7 @@ def _link_speed_to_generation(link_speed: str) -> Optional[str]:
     return None
 
 
-def _linux_cpu_identity() -> tuple[Optional[str], Optional[str]]:
+def _linux_cpu_identity() -> tuple[str | None, str | None]:
     cpuinfo = Path("/proc/cpuinfo")
     try:
         lines = cpuinfo.read_text(encoding="utf-8", errors="ignore").splitlines()
@@ -542,6 +678,50 @@ def _linux_cpu_identity() -> tuple[Optional[str], Optional[str]]:
     return model_name, vendor
 
 
+def _windows_cpu_identity() -> tuple[str | None, str | None]:
+    """Return Windows CPU brand string and vendor from the registry.
+
+    ``platform.processor()`` often returns a low-level CPUID descriptor such as
+    ``Intel64 Family 6 Model 191 Stepping 2, GenuineIntel`` on Windows. The
+    registry value below contains the user-facing processor brand string, e.g.
+    ``13th Gen Intel(R) Core(TM) i5-13500``.
+    """
+    try:
+        import winreg
+    except ImportError:
+        return None, None
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+        ) as key:
+            model_name = _read_windows_registry_string(
+                winreg,
+                key,
+                "ProcessorNameString",
+            )
+            vendor = _read_windows_registry_string(
+                winreg,
+                key,
+                "VendorIdentifier",
+            )
+    except OSError:
+        return None, None
+    return model_name, vendor
+
+
+def _read_windows_registry_string(winreg_module: object, key: object, name: str) -> str | None:
+    try:
+        value, _value_type = winreg_module.QueryValueEx(key, name)
+    except OSError:
+        return None
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
 def _read_os_release() -> dict[str, str]:
     try:
         output = Path("/etc/os-release").read_text(encoding="utf-8")
@@ -556,12 +736,12 @@ def _read_os_release() -> dict[str, str]:
     return values
 
 
-def run_command(command: list[str]) -> Optional[str]:
+def run_command(command: list[str]) -> str | None:
     """Run a command and return stdout on success."""
     return run_command_with_timeout(command, timeout=5)
 
 
-def run_command_with_timeout(command: list[str], timeout: int) -> Optional[str]:
+def run_command_with_timeout(command: list[str], timeout: int) -> str | None:
     """Run a command and return stdout on success."""
     try:
         result = subprocess.run(
