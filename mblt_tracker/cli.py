@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
+import platform
 import sys
 from pathlib import Path
 from typing import Optional, Sequence, TextIO
 
+from ._types import CollectOutput
 from .static_info import (
+    _clean_typed_dict,
     _deep_merge,
+    get_linux_npu_driver_firmware_info,
     get_host_static_info,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
@@ -19,9 +24,10 @@ def collect_static_info(
     pcie_device_id: Optional[str] = None,
     pcie_class_filter: Optional[str] = None,
     all_pcie_devices: bool = False,
-) -> dict[str, object]:
+    sudo_password: Optional[str] = None,
+) -> CollectOutput:
     """Collect best-effort static host and PCIe information."""
-    info = get_host_static_info()
+    info = get_host_static_info(sudo_password=sudo_password)
     _deep_merge(
         info,
         get_pcie_static_info(
@@ -32,7 +38,8 @@ def collect_static_info(
         ),
     )
     _deep_merge(info, get_windows_npu_driver_firmware_info())
-    return info
+    _deep_merge(info, get_linux_npu_driver_firmware_info())
+    return _clean_typed_dict(info, CollectOutput)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -87,11 +94,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "collect":
+        sudo_password = None
+        if platform.system() == "Linux":
+            sudo_password = getpass.getpass("[sudo] password for dmidecode: ")
         info = collect_static_info(
             pcie_vendor_id=args.pcie_vendor_id,
             pcie_device_id=args.pcie_device_id,
             pcie_class_filter=args.pcie_class_filter,
             all_pcie_devices=args.all_pcie_devices,
+            sudo_password=sudo_password,
         )
         _write_json(info, args.output, sys.stdout)
         return 0

@@ -218,8 +218,18 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
     "cuda": {
       "version": "not_found"
     },
+    "driver": {
+      "aries_version": "1.12.0",
+      "regulus_version": "N/A"
+    },
+    "firmware": {
+      "version": "1.2.4",
+      "versions": [
+        "1.2.4"
+      ]
+    },
     "os": {
-      "kernel_version": "11",
+      "kernel_version": "6.17.0-23-generic",
       "name": "Windows",
       "version": "10.0.26200"
     },
@@ -237,60 +247,95 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
 
 ```bash
 $ mblt-tracker collect
+[sudo] password for dmidecode: 
 {
   "hardware": {
-    "host": {
-      "cpu": {
-        "architecture": "<architecture>",
-        "logical_cores": <logical_cores>,
-        "model_name": "<cpu_model_name>",
-        "physical_cores": <physical_cores>,
-        "vendor": "<cpu_vendor>"
-      },
-      "dram": {
-        "available_bytes": <available_bytes>,
-        "total_bytes": <total_bytes>
-      }
+    "cpu": {
+      "architecture": "x86_64",
+      "logical_cores": 20,
+      "model_name": "13th Gen Intel(R) Core(TM) i5-13600K",
+      "physical_cores": 14,
+      "vendor": "GenuineIntel"
     },
-    "pcie": {
-      "gpus": [
+    "dram": {
+      "available_bytes": 27351511040,
+      "dimms": [
         {
-          "bus_address": "<pci_bus_address>",
-          "dev_no": 0,
-          "device_id": "0x<device_id>",
-          "vendor_id": "0x<vendor_id>",
-          "current_link_speed": "<current_link_speed>",
-          "current_link_width": "<current_link_width>",
-          "max_link_speed": "<max_link_speed>",
-          "max_link_width": "<max_link_width>",
-          "link_generation": "<GenN>",
-          "lane_width": "x<width>"
+          "capacity_bytes": 17179869184,
+          "configured_speed_mhz": 4800,
+          "data_width_bits": 64,
+          "manufacturer": "G Skill Intl",
+          "part_number": "F5-6000J3040F16G",
+          "serial_number": "5D5D31F7",
+          "speed_mhz": 4800,
+          "total_width_bits": 64,
+          "type": "DDR5"
+        },
+        {
+          "capacity_bytes": 17179869184,
+          "configured_speed_mhz": 4800,
+          "data_width_bits": 64,
+          "manufacturer": "G Skill Intl",
+          "part_number": "F5-6000J3040F16G",
+          "serial_number": "6154BFF9",
+          "speed_mhz": 4800,
+          "total_width_bits": 64,
+          "type": "DDR5"
         }
       ],
-      "npus": [
-        {
-          "bus_address": "<pci_bus_address>",
-          "dev_no": 0,
-          "device_id": "0x<device_id>",
-          "vendor_id": "0x<vendor_id>",
-          "current_link_speed": "<current_link_speed>",
-          "current_link_width": "<current_link_width>",
-          "max_link_speed": "<max_link_speed>",
-          "max_link_width": "<max_link_width>",
-          "link_generation": "<GenN>",
-          "lane_width": "x<width>"
-        }
-      ]
-    }
+      "theoretical_bandwidth_gbps": 76.8,
+      "total_bytes": 33379598336
+    },
+    "npus": [
+      {
+        "board_name": "aries0",
+        "bus_address": "0000:01:00.0",
+        "class": "0x078000",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 0,
+        "device_id": "0x0000",
+        "driver_name": "aries",
+        "firmware": {
+          "version": "1.2.4"
+        },
+        "lane_width": "x8",
+        "link_generation": "Gen4",
+        "manufacturer": "MOBILINT, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "name": "MOBILINT NPU Accelerator",
+        "revision": "0x02",
+        "subsystem_device_id": "0x1093",
+        "subsystem_vendor_id": "0x0402",
+        "vendor_id": "0x209f"
+      }
+    ]
   },
   "inference": {
     "cpu": {
-      "governor": "<cpu_governor>"
+      "governor": "powersave",
+      "max_processor_state_pct": null,
+      "min_processor_state_pct": null,
+      "power_plan": null
+    },
+    "cuda": {
+      "version": "12.8"
+    },
+    "driver": {
+      "aries_version": "1.12.0",
+      "regulus_version": "N/A"
     },
     "os": {
-      "kernel_version": "<kernel_version>",
+      "kernel_version": "6.17.0-23-generic",
       "name": "Linux",
-      "version": "<distribution_version>"
+      "version": "Ubuntu 24.04.4 LTS"
+    },
+    "qbcompiler": {
+      "version": "not_installed"
+    },
+    "qbruntime": {
+      "version": "v1.2.0"
     }
   }
 }
@@ -412,6 +457,7 @@ Typical fields include:
 
 - `hardware.host.cpu`: CPU architecture, model name, vendor, physical cores, logical cores
 - `hardware.host.dram`: total and available memory in bytes
+- `hardware.host.dram.dimms`: physical DIMM metadata from `dmidecode` when available. On Linux, sudo password is required.
 - `inference.os`: OS name, version, and kernel version
 - `inference.cpu.governor`: Linux CPU frequency governor, when available
 - `hardware.pcie.npus` / `hardware.pcie.gpus`: categorized PCIe accelerators, including vendor/device IDs and link information where available

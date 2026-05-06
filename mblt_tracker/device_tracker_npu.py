@@ -14,6 +14,7 @@ from .static_info import (
     _deep_merge,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
+    parse_mobilint_status_static_info,
     run_command,
 )
 
@@ -339,41 +340,4 @@ class NPUDeviceTracker(BaseDeviceTracker):
 
 def _parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
     """Parse static NPU fields from ``mobilint-cli status`` table output."""
-    info: dict[str, object] = {}
-    driver_match = re.search(r"Drivers\s*-\s*Aries:\s*([^\s]+)\s+Regulus:\s*([^\s|]+)", status_output)
-    if driver_match is not None:
-        info.setdefault("inference", {})["driver"] = {
-            "aries_version": driver_match.group(1),
-            "regulus_version": driver_match.group(2),
-        }
-    device_matches = re.findall(
-        r"\|\s*(\d+)\s+([A-Za-z0-9_-]+)\(([^)]+)\).*?\|", status_output
-    )
-    if device_matches:
-        devices = []
-        products = []
-        for device_index, product, board_name in device_matches:
-            products.append(product)
-            devices.append(
-                {
-                    "device_index": int(device_index),
-                    "product": product,
-                    "board_name": board_name,
-                }
-            )
-        npu_info = {
-            "device_count": len(devices),
-            "devices": devices,
-        }
-        if len(set(products)) == 1:
-            npu_info["product"] = products[0]
-        info.setdefault("hardware", {})["npu"] = npu_info
-    firmware_matches = re.findall(
-        r"\|\s*\d+\s+[0-9]+(?:\.[0-9]+)?\s*C\s+([^\s|]+)", status_output
-    )
-    if firmware_matches:
-        info.setdefault("inference", {})["firmware"] = {
-            "version": firmware_matches[0],
-            "versions": firmware_matches,
-        }
-    return info
+    return parse_mobilint_status_static_info(status_output)

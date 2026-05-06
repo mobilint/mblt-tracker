@@ -9,6 +9,7 @@ from mblt_tracker.static_info import (
     _calculate_theoretical_bandwidth_gbps,
     _get_cuda_version,
     _get_python_package_version,
+    get_cpu_power_policy,
     _parse_nvcc_cuda_version,
     _read_windows_pci_link_properties,
     _normalize_windows_power_plan_name,
@@ -16,6 +17,7 @@ from mblt_tracker.static_info import (
     _parse_windows_active_power_scheme,
     _parse_windows_power_setting_ac_value,
     _read_dram_dimms_linux,
+    _read_lspci_device_metadata,
     _read_dram_dimms_windows,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
@@ -181,6 +183,75 @@ def test_read_dram_dimms_linux_returns_empty_list_on_command_failure(monkeypatch
     assert _read_dram_dimms_linux() == []
 
 
+def test_read_dram_dimms_linux_tries_non_interactive_sudo(monkeypatch) -> None:
+    output = """
+Handle 0x0038, DMI type 17, 40 bytes
+Memory Device
+        Total Width: 64 bits
+        Data Width: 64 bits
+        Size: 16 GB
+        Type: DDR5
+        Speed: 5600 MT/s
+        Manufacturer: Samsung
+        Serial Number: 12345678
+        Part Number: M425R2GA3BB0-CWM
+        Configured Memory Speed: 5600 MT/s
+    """
+    commands = []
+
+    def fake_run_command(command):
+        commands.append(command)
+        if command == ["sudo", "-n", "dmidecode", "-t", "memory"]:
+            return output
+        return None
+
+    monkeypatch.setattr(static_info, "run_command", fake_run_command)
+
+    dimms = _read_dram_dimms_linux()
+
+    assert commands == [
+        ["dmidecode", "-t", "memory"],
+        ["sudo", "-n", "dmidecode", "-t", "memory"],
+    ]
+    assert dimms[0]["manufacturer"] == "Samsung"
+
+
+def test_read_dram_dimms_linux_uses_password_for_sudo(monkeypatch) -> None:
+    output = """
+Handle 0x0038, DMI type 17, 40 bytes
+Memory Device
+        Total Width: 64 bits
+        Data Width: 64 bits
+        Size: 16 GB
+        Type: DDR5
+        Speed: 5600 MT/s
+        Manufacturer: Samsung
+        Serial Number: 12345678
+        Part Number: M425R2GA3BB0-CWM
+        Configured Memory Speed: 5600 MT/s
+    """
+    commands = []
+
+    def fake_run_command(command):
+        commands.append((command, None, None))
+        return None
+
+    def fake_run_command_with_input(command, input_text, timeout):
+        commands.append((command, input_text, timeout))
+        return output
+
+    monkeypatch.setattr(static_info, "run_command", fake_run_command)
+    monkeypatch.setattr(static_info, "run_command_with_input", fake_run_command_with_input)
+
+    dimms = _read_dram_dimms_linux(sudo_password="secret")
+
+    assert commands == [
+        (["dmidecode", "-t", "memory"], None, None),
+        (["sudo", "-S", "-p", "", "dmidecode", "-t", "memory"], "secret\n", 30),
+    ]
+    assert dimms[0]["manufacturer"] == "Samsung"
+
+
 def test_calculate_theoretical_bandwidth_gbps() -> None:
     dimms = [
         {"configured_speed_mhz": 3200, "data_width_bits": 64},
@@ -245,6 +316,70 @@ def test_get_pcie_static_info_reads_sysfs_and_selects_matching_device(
     assert npus[1]["current_link_speed"] == "8.0 GT/s PCIe"
     assert npus[1]["link_generation"] == "Gen3"
     assert npus[1]["lane_width"] == "x4"
+
+
+def test_get_pcie_static_info_reads_linux_revision_driver_and_known_names(
+    monkeypatch, tmp_path
+) -> None:
+    sysfs = tmp_path / "pci"
+    npu = sysfs / "0000_01_00.0"
+    driver = tmp_path / "drivers" / "mblt_npu"
+    npu.mkdir(parents=True)
+    (driver / "module").mkdir(parents=True)
+
+    _write(npu / "vendor", "0x209f\n")
+    _write(npu / "device", "0x0000\n")
+    _write(npu / "class", "0x078000\n")
+    _write(npu / "revision", "0x02\n")
+    _write(npu / "current_link_speed", "16.0 GT/s PCIe\n")
+    _write(npu / "current_link_width", "8\n")
+    _write(driver / "module" / "version", "1.8.1\n")
+    (npu / "driver").symlink_to(driver)
+
+    monkeypatch.setenv("MBLT_TRACKER_PCI_SYSFS", str(sysfs))
+    monkeypatch.setattr(static_info, "run_command", lambda _command: None)
+
+    info = get_pcie_static_info()
+
+    npu_info = info["hardware"]["npus"][0]
+    assert npu_info["name"] == "MOBILINT NPU Accelerator"
+    assert npu_info["manufacturer"] == "MOBILINT, Inc."
+    assert npu_info["revision"] == "0x02"
+    assert npu_info["driver_name"] == "mblt_npu"
+    assert npu_info["driver_version"] == "1.8.1"
+
+
+def test_lspci_metadata_parses_machine_readable_output(monkeypatch) -> None:
+    output = '0000:01:00.0 "3D controller [0302]" "NVIDIA Corporation [10de]" "AD102 [GeForce RTX 4090] [2684]"\n'
+    monkeypatch.setattr(static_info, "run_command", lambda _command: output)
+
+    metadata = _read_lspci_device_metadata()
+
+    assert metadata["0000:01:00.0"] == {
+        "manufacturer": "NVIDIA Corporation",
+        "name": "AD102 [GeForce RTX 4090]",
+    }
+
+
+def test_get_pcie_static_info_filters_intel_igpu_without_pcie_link(
+    monkeypatch, tmp_path
+) -> None:
+    sysfs = tmp_path / "pci"
+    igpu = sysfs / "0000_00_02.0"
+    igpu.mkdir(parents=True)
+
+    _write(igpu / "vendor", "0x8086\n")
+    _write(igpu / "device", "0xa780\n")
+    _write(igpu / "class", "0x030000\n")
+    _write(igpu / "current_link_speed", "Unknown\n")
+    _write(igpu / "current_link_width", "0\n")
+
+    monkeypatch.setenv("MBLT_TRACKER_PCI_SYSFS", str(sysfs))
+    monkeypatch.setattr(static_info, "run_command", lambda _command: None)
+
+    info = get_pcie_static_info()
+
+    assert info == {}
 
 
 def test_get_pcie_static_info_can_include_all_devices(monkeypatch, tmp_path) -> None:
@@ -401,6 +536,7 @@ def test_get_windows_power_policy_uses_windows_native_names(monkeypatch) -> None
     policy = get_windows_power_policy()
 
     assert policy == {
+        "governor": None,
         "power_plan": "Balanced",
         "min_processor_state_pct": 5,
         "max_processor_state_pct": 100,
@@ -427,9 +563,22 @@ def test_get_windows_power_policy_normalizes_builtin_plan_to_english(
     policy = get_windows_power_policy()
 
     assert policy == {
+        "governor": None,
         "power_plan": "High performance",
         "min_processor_state_pct": 100,
         "max_processor_state_pct": 100,
+    }
+
+
+def test_get_cpu_power_policy_keeps_os_independent_shape(monkeypatch) -> None:
+    monkeypatch.setattr(static_info.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(static_info, "get_cpu_governor", lambda: "powersave")
+
+    assert get_cpu_power_policy() == {
+        "governor": "powersave",
+        "power_plan": None,
+        "min_processor_state_pct": None,
+        "max_processor_state_pct": None,
     }
 
 

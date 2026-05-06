@@ -4,17 +4,24 @@ import json
 import os
 import platform
 import re
+import shlex
 import subprocess
 from importlib import metadata
 from pathlib import Path
 
 import psutil
 
+from ._types import (
+    STATIC_INFO_CHILD_SCHEMAS,
+    CollectOutput,
+    CpuPowerPolicy,
+)
 
-def get_host_static_info() -> dict[str, object]:
+
+def get_host_static_info(sudo_password: str | None = None) -> CollectOutput:
     """Collect best-effort host CPU, DRAM, and OS static information."""
     virtual_memory = psutil.virtual_memory()
-    info: dict[str, object] = {
+    info: CollectOutput = {
         "hardware": {
             "cpu": {
                 "architecture": platform.machine(),
@@ -49,7 +56,7 @@ def get_host_static_info() -> dict[str, object]:
     if platform.system() == "Windows":
         dimms = _read_dram_dimms_windows()
     elif platform.system() == "Linux":
-        dimms = _read_dram_dimms_linux()
+        dimms = _read_dram_dimms_linux(sudo_password=sudo_password)
     else:
         dimms = []
     if dimms:
@@ -58,19 +65,21 @@ def get_host_static_info() -> dict[str, object]:
         theoretical_bandwidth_gbps = _calculate_theoretical_bandwidth_gbps(dimms)
         if theoretical_bandwidth_gbps is not None:
             dram["theoretical_bandwidth_gbps"] = theoretical_bandwidth_gbps
+    elif platform.system() == "Linux":
+        info["hardware"]["dram"]["dimms_collection_note"] = (
+            "Physical DIMM metadata requires dmidecode access. Run "
+            "`mblt-tracker collect` in an interactive terminal and enter the "
+            "sudo password, or install/configure dmidecode."
+        )
 
     if platform.system() == "Linux":
         os_release = _read_os_release()
         pretty_name = os_release.get("PRETTY_NAME")
         if pretty_name:
             info["inference"]["os"]["version"] = pretty_name
-        governor = get_cpu_governor()
-        if governor is not None:
-            info["inference"]["cpu"] = {"governor": governor}
+        info["inference"]["cpu"] = get_cpu_power_policy()
     elif platform.system() == "Windows":
-        power_policy = get_windows_power_policy()
-        if power_policy:
-            info["inference"]["cpu"] = power_policy
+        info["inference"]["cpu"] = get_cpu_power_policy()
 
     info["inference"]["cuda"] = {"version": _get_cuda_version() or "not_found"}
     info["inference"]["qbruntime"] = {
@@ -80,7 +89,27 @@ def get_host_static_info() -> dict[str, object]:
         "version": _get_python_package_version("qbcompiler") or "not_installed"
     }
 
-    return _remove_none_values(info)
+    return _clean_typed_dict(info, CollectOutput)
+
+
+def get_cpu_power_policy() -> CpuPowerPolicy:
+    """Return OS-independent CPU power policy fields.
+
+    Linux exposes CPU frequency governors while Windows exposes power plans and
+    processor state limits. All fields are returned on every OS so type checking
+    and JSON consumers can rely on the same shape.
+    """
+    policy: CpuPowerPolicy = {
+        "governor": None,
+        "power_plan": None,
+        "min_processor_state_pct": None,
+        "max_processor_state_pct": None,
+    }
+    if platform.system() == "Linux":
+        policy["governor"] = get_cpu_governor()
+    elif platform.system() == "Windows":
+        policy.update(get_windows_power_policy())
+    return policy
 
 
 def _get_cuda_version() -> str | None:
@@ -167,7 +196,7 @@ def get_cpu_governor() -> str | None:
     return ",".join(unique)
 
 
-def get_windows_power_policy() -> dict[str, object]:
+def get_windows_power_policy() -> CpuPowerPolicy:
     """Return active Windows power policy information.
 
     Windows does not expose Linux-style CPU frequency governors. Instead, the
@@ -176,15 +205,30 @@ def get_windows_power_policy() -> dict[str, object]:
     """
     active_scheme_output = run_command(["powercfg", "/getactivescheme"])
     if active_scheme_output is None:
-        return {}
+        return {
+            "governor": None,
+            "power_plan": None,
+            "min_processor_state_pct": None,
+            "max_processor_state_pct": None,
+        }
 
     scheme_guid, power_plan = _parse_windows_active_power_scheme(
         active_scheme_output
     )
     if scheme_guid is None and power_plan is None:
-        return {}
+        return {
+            "governor": None,
+            "power_plan": None,
+            "min_processor_state_pct": None,
+            "max_processor_state_pct": None,
+        }
 
-    policy: dict[str, object] = {}
+    policy: CpuPowerPolicy = {
+        "governor": None,
+        "power_plan": None,
+        "min_processor_state_pct": None,
+        "max_processor_state_pct": None,
+    }
     if power_plan is not None:
         policy["power_plan"] = _normalize_windows_power_plan_name(
             scheme_guid,
@@ -243,12 +287,12 @@ def _parse_windows_active_power_scheme(
     return scheme_guid, power_plan
 
 
-def _read_windows_processor_power_states(scheme_guid: str) -> dict[str, object]:
+def _read_windows_processor_power_states(scheme_guid: str) -> dict[str, int]:
     processor_subgroup_guid = "54533251-82be-4824-96c1-47b60b740d00"
     min_processor_state_guid = "893dee8e-2bef-41e0-89c6-b55d0929964c"
     max_processor_state_guid = "bc5038f7-23e0-4960-96da-33abaf5935ec"
 
-    values: dict[str, object] = {}
+    values: dict[str, int] = {}
     min_value = _read_windows_power_setting_ac_value(
         scheme_guid,
         processor_subgroup_guid,
@@ -346,12 +390,74 @@ def _read_dram_dimms_windows() -> list[dict[str, object]]:
     return dimms
 
 
-def _read_dram_dimms_linux() -> list[dict[str, object]]:
-    """Collect physical memory module information from Linux dmidecode."""
+def _read_dram_dimms_linux(
+    sudo_password: str | None = None,
+) -> list[dict[str, object]]:
+    """Collect physical memory module information from Linux dmidecode.
+
+    ``dmidecode`` normally requires root privileges. Try the direct command
+    first. When a sudo password is supplied, pass it to ``sudo -S`` so the
+    public ``mblt-tracker collect`` command can collect richer output without
+    requiring users to run the whole CLI through sudo. Without a supplied
+    password, keep the best-effort non-interactive sudo fallback for library
+    callers. If all attempts fail, callers add a permission note to the public
+    output.
+    """
     output = run_command(["dmidecode", "-t", "memory"])
+    if output is None:
+        if sudo_password is not None:
+            output = run_command_with_input(
+                ["sudo", "-S", "-p", "", "dmidecode", "-t", "memory"],
+                input_text=f"{sudo_password}\n",
+                timeout=30,
+            )
+        else:
+            output = run_command(["sudo", "-n", "dmidecode", "-t", "memory"])
     if output is None:
         return []
     return _parse_linux_dmidecode_memory(output)
+
+
+def get_linux_npu_driver_firmware_info() -> dict[str, object]:
+    """Collect Linux NPU driver/firmware metadata from mobilint-cli status."""
+    if platform.system() != "Linux":
+        return {}
+    status_output = run_command(["mobilint-cli", "status"])
+    if not status_output:
+        return {}
+    return parse_mobilint_status_static_info(status_output)
+
+
+def parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
+    """Parse static NPU fields from ``mobilint-cli status`` table output."""
+    info: dict[str, object] = {}
+    driver_match = re.search(
+        r"Drivers\s*-\s*Aries:\s*([^\s]+)\s+Regulus:\s*([^\s|]+)",
+        status_output,
+    )
+    if driver_match is not None:
+        info.setdefault("inference", {})["driver"] = {
+            "aries_version": driver_match.group(1),
+            "regulus_version": driver_match.group(2),
+        }
+    device_matches = re.findall(
+        r"\|\s*(\d+)\s+([A-Za-z0-9_-]+)\(([^)]+)\).*?\|", status_output
+    )
+    firmware_matches = re.findall(
+        r"\|\s*\d+\s+[0-9]+(?:\.[0-9]+)?\s*C\s+([^\s|]+)", status_output,
+    )
+    if device_matches:
+        devices = []
+        for idx, (device_index, _product, board_name) in enumerate(device_matches):
+            device: dict[str, object] = {
+                "dev_no": int(device_index),
+                "board_name": board_name,
+            }
+            if idx < len(firmware_matches):
+                device["firmware"] = {"version": firmware_matches[idx]}
+            devices.append(device)
+        info.setdefault("hardware", {})["npus"] = devices
+    return info
 
 
 def _parse_linux_dmidecode_memory(output: str) -> list[dict[str, object]]:
@@ -837,6 +943,7 @@ def _read_pcie_devices(sysfs_root: Path) -> list[dict[str, object]]:
     devices = []
     if not sysfs_root.exists():
         return devices
+    lspci_metadata = _read_lspci_device_metadata()
     for device_dir in sorted(path for path in sysfs_root.iterdir() if path.is_dir()):
         device = {
             "bus_address": device_dir.name,
@@ -845,13 +952,95 @@ def _read_pcie_devices(sysfs_root: Path) -> list[dict[str, object]]:
             "subsystem_vendor_id": _read_first_line(device_dir / "subsystem_vendor"),
             "subsystem_device_id": _read_first_line(device_dir / "subsystem_device"),
             "class": _read_first_line(device_dir / "class"),
+            "revision": _read_first_line(device_dir / "revision"),
             "current_link_speed": _read_first_line(device_dir / "current_link_speed"),
             "current_link_width": _read_first_line(device_dir / "current_link_width"),
             "max_link_speed": _read_first_line(device_dir / "max_link_speed"),
             "max_link_width": _read_first_line(device_dir / "max_link_width"),
         }
+        device.update(_read_linux_pcie_driver_metadata(device_dir))
+        device.update(lspci_metadata.get(device_dir.name, {}))
+        device.update(_linux_known_pcie_metadata(device))
         devices.append({key: value for key, value in device.items() if value is not None})
     return devices
+
+
+def _read_linux_pcie_driver_metadata(device_dir: Path) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    driver_path = device_dir / "driver"
+    if not driver_path.exists():
+        return metadata
+    try:
+        driver_name = driver_path.resolve().name
+    except OSError:
+        driver_name = None
+    if driver_name:
+        metadata["driver_name"] = driver_name
+        version = _read_first_line(driver_path / "module" / "version")
+        if version is not None:
+            metadata["driver_version"] = version
+    return metadata
+
+
+def _read_lspci_device_metadata() -> dict[str, dict[str, object]]:
+    output = run_command(["lspci", "-Dmmnn"])
+    if output is None:
+        return {}
+
+    metadata: dict[str, dict[str, object]] = {}
+    for line in output.splitlines():
+        try:
+            fields = shlex.split(line)
+        except ValueError:
+            continue
+        if len(fields) < 4:
+            continue
+        bus_address = fields[0]
+        vendor = _strip_lspci_numeric_suffix(fields[2])
+        name = _strip_lspci_numeric_suffix(fields[3])
+        values = {}
+        if vendor:
+            values["manufacturer"] = vendor
+        if name:
+            values["name"] = name
+        if values:
+            metadata[bus_address] = values
+    return metadata
+
+
+def _strip_lspci_numeric_suffix(value: str) -> str | None:
+    value = re.sub(r"\s*\[[0-9a-fA-F]{4,6}\]\s*$", "", value).strip()
+    return value or None
+
+
+def _linux_known_pcie_metadata(device: dict[str, object]) -> dict[str, object]:
+    vendor = _normalize_hex(str(device.get("vendor_id", "")))
+    device_id = _normalize_hex(str(device.get("device_id", "")))
+    known: dict[tuple[str, str | None], dict[str, object]] = {
+        ("209f", None): {
+            "manufacturer": "MOBILINT, Inc.",
+            "name": "MOBILINT NPU Accelerator",
+        },
+        ("1ed5", None): {
+            "manufacturer": "MOBILINT, Inc.",
+            "name": "MOBILINT NPU Accelerator",
+        },
+        ("10de", None): {"manufacturer": "NVIDIA"},
+        ("8086", None): {"manufacturer": "Intel"},
+        ("1002", None): {"manufacturer": "AMD"},
+    }
+    values = dict(known.get((vendor or "", None), {}))
+    values.update(known.get((vendor or "", device_id), {}))
+    resolved = {}
+    for key, value in values.items():
+        existing = device.get(key)
+        if existing is None or _is_generic_lspci_label(str(existing)):
+            resolved[key] = value
+    return resolved
+
+
+def _is_generic_lspci_label(value: str) -> bool:
+    return value.strip().lower() in {"device", "vendor"}
 
 
 def _find_all_npu_devices(
@@ -908,6 +1097,7 @@ def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, obj
         "pnp_device_id",
         "revision",
         "driver_version",
+        "driver_name",
         "driver_date",
         "driver_description",
         "driver_provider",
@@ -969,6 +1159,9 @@ def _is_relevant_pcie_device(device: dict[str, object]) -> bool:
 
 
 def _is_likely_gpu_device(device: dict[str, object]) -> bool:
+    if _is_integrated_gpu_without_pcie_link(device):
+        return False
+
     class_code = _normalize_hex(str(device.get("class", "")))
     if class_code is not None and class_code.startswith("03"):
         return True
@@ -978,6 +1171,25 @@ def _is_likely_gpu_device(device: dict[str, object]) -> bool:
     ).lower()
     gpu_keywords = ("amd", "geforce", "gpu", "nvidia", "radeon", "tesla")
     return any(keyword in text for keyword in gpu_keywords)
+
+
+def _is_integrated_gpu_without_pcie_link(device: dict[str, object]) -> bool:
+    """Return true for on-die display controllers that are not PCIe GPUs."""
+    class_code = _normalize_hex(str(device.get("class", "")))
+    if class_code is None or not class_code.startswith("03"):
+        return False
+
+    bus_address = str(device.get("bus_address", ""))
+    current_link_speed = str(device.get("current_link_speed", "")).strip().lower()
+    current_link_width = str(device.get("current_link_width", "")).strip()
+    vendor = _normalize_hex(str(device.get("vendor_id", "")))
+
+    is_root_bus_display = bus_address.startswith(("0000:00:", "0000_00_"))
+    has_no_pcie_link = current_link_speed in {"", "unknown"} or current_link_width in {
+        "",
+        "0",
+    }
+    return vendor == "8086" and is_root_bus_display and has_no_pcie_link
 
 
 def _is_likely_npu_device(device: dict[str, object]) -> bool:
@@ -1016,23 +1228,59 @@ def _deep_merge(
     """Recursively merge nested dictionaries and return ``base``."""
     for key, value in overlay.items():
         existing = base.get(key)
-        if isinstance(existing, dict) and isinstance(value, dict):
+        if key in {"npus", "gpus", "pcie_devices"} and isinstance(existing, list) and isinstance(value, list):
+            base[key] = _merge_device_lists(existing, value)
+        elif isinstance(existing, dict) and isinstance(value, dict):
             _deep_merge(existing, value)
         else:
             base[key] = value
     return base
 
 
-def _remove_none_values(value: object) -> object:
+def _merge_device_lists(
+    base: list[object], overlay: list[object]
+) -> list[object]:
+    merged = [dict(item) if isinstance(item, dict) else item for item in base]
+    for overlay_index, overlay_item in enumerate(overlay):
+        if not isinstance(overlay_item, dict):
+            merged.append(overlay_item)
+            continue
+        overlay_key = overlay_item.get("dev_no", overlay_index)
+        matched = False
+        for base_index, base_item in enumerate(merged):
+            if not isinstance(base_item, dict):
+                continue
+            base_key = base_item.get("dev_no", base_index)
+            if base_key == overlay_key:
+                _deep_merge(base_item, overlay_item)
+                matched = True
+                break
+        if not matched:
+            merged.append(dict(overlay_item))
+    return merged
+
+
+def _clean_typed_dict(value: object, schema: object | None = None) -> object:
+    """Remove None from optional fields while preserving required schema keys."""
     if isinstance(value, dict):
-        return {
-            key: cleaned
-            for key, item in value.items()
-            if (cleaned := _remove_none_values(item)) is not None
-        }
+        required_keys = getattr(schema, "__required_keys__", frozenset())
+        child_schemas = STATIC_INFO_CHILD_SCHEMAS.get(schema, {}) if isinstance(schema, type) else {}
+        cleaned: dict[str, object] = {}
+        for key, item in value.items():
+            child_schema = child_schemas.get(key)
+            cleaned_item = _clean_typed_dict(item, child_schema)
+            if cleaned_item is not None or key in required_keys:
+                cleaned[key] = cleaned_item
+        return cleaned
     if isinstance(value, list):
-        return [_remove_none_values(item) for item in value]
+        item_schema = schema[0] if isinstance(schema, list) and schema else None
+        return [_clean_typed_dict(item, item_schema) for item in value]
     return value
+
+
+def _remove_none_values(value: object) -> object:
+    """Backward-compatible wrapper for callers/tests that clean untyped data."""
+    return _clean_typed_dict(value)
 
 
 def _link_speed_to_generation(link_speed: str) -> str | None:
@@ -1144,6 +1392,28 @@ def run_command_with_timeout(command: list[str], timeout: int) -> str | None:
     try:
         result = subprocess.run(
             command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout or None
+
+
+def run_command_with_input(
+    command: list[str],
+    input_text: str,
+    timeout: int,
+) -> str | None:
+    """Run a command with stdin input and return stdout on success."""
+    try:
+        result = subprocess.run(
+            command,
+            input=input_text,
             check=False,
             capture_output=True,
             text=True,
