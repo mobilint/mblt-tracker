@@ -12,6 +12,7 @@ import numpy as np
 from .device_tracker import BaseDeviceTracker
 from .static_info import (
     _deep_merge,
+    _filter_npu_metadata_to_selected_devices,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
     parse_mobilint_status_static_info,
@@ -297,17 +298,28 @@ class NPUDeviceTracker(BaseDeviceTracker):
         driver, product, and form-factor fields are parsed from ``mobilint-cli
         status`` on a best-effort basis.
         """
+        pcie_vendor_id = os.environ.get("MBLT_TRACKER_NPU_PCI_VENDOR_ID")
+        pcie_device_id = os.environ.get("MBLT_TRACKER_NPU_PCI_DEVICE_ID")
+        pcie_class_filter = os.environ.get("MBLT_TRACKER_NPU_PCI_CLASS_FILTER")
+        has_pcie_filter = any((pcie_vendor_id, pcie_device_id, pcie_class_filter))
         info = get_pcie_static_info(
-            vendor_id=os.environ.get("MBLT_TRACKER_NPU_PCI_VENDOR_ID"),
-            device_id=os.environ.get("MBLT_TRACKER_NPU_PCI_DEVICE_ID"),
-            class_filter=os.environ.get("MBLT_TRACKER_NPU_PCI_CLASS_FILTER"),
+            vendor_id=pcie_vendor_id,
+            device_id=pcie_device_id,
+            class_filter=pcie_class_filter,
         )
+        hardware = info.get("hardware", {})
+        filtered_npus = []
+        if isinstance(hardware, dict) and isinstance(hardware.get("npus"), list):
+            filtered_npus = [npu for npu in hardware["npus"] if isinstance(npu, dict)]
         if platform.system() == "Windows":
             _deep_merge(info, get_windows_npu_driver_firmware_info())
         else:
             status_output = run_command(["mobilint-cli", "status"])
             if status_output:
-                _deep_merge(info, _parse_mobilint_status_static_info(status_output))
+                status_info = _parse_mobilint_status_static_info(status_output)
+                if has_pcie_filter:
+                    _filter_npu_metadata_to_selected_devices(status_info, filtered_npus)
+                _deep_merge(info, status_info)
         return info
 
     def get_util_trace(self) -> list[tuple[float, float]]:

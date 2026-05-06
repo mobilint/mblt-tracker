@@ -140,3 +140,53 @@ def test_npu_get_static_info_uses_windows_pnp_metadata_without_mobilint_cli(
         "inference": {"npu_driver_version": "1.8.1.1348"},
     }
     assert commands == []
+
+
+def test_npu_get_static_info_preserves_filtered_pcie_npus_when_merging_status(
+    monkeypatch,
+) -> None:
+    tracker = object.__new__(NPUDeviceTracker)
+    status_output = """
+Drivers - Aries: 1.8.1 Regulus: 1.12.0 |
+| 0 Aries(Board-A) | 42 C 2.0.1 |
+| 0 42 C 2.0.1 |
+| 1 Aries(Board-B) | 43 C 2.0.2 |
+| 1 43 C 2.0.2 |
+"""
+
+    monkeypatch.setenv("MBLT_TRACKER_NPU_PCI_DEVICE_ID", "0000")
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.platform.system", lambda: "Linux")
+    monkeypatch.setattr(
+        "mblt_tracker.device_tracker_npu.get_pcie_static_info",
+        lambda vendor_id=None, device_id=None, class_filter=None: {
+            "hardware": {
+                "npus": [
+                    {
+                        "dev_no": 1,
+                        "bus_address": "0000:02:00.0",
+                        "vendor_id": "0x209f",
+                    }
+                ]
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "mblt_tracker.device_tracker_npu.run_command",
+        lambda _command: status_output,
+    )
+
+    info = tracker.get_static_info()
+
+    assert info["hardware"]["npus"] == [
+        {
+            "dev_no": 1,
+            "bus_address": "0000:02:00.0",
+            "vendor_id": "0x209f",
+            "board_name": "Board-B",
+            "firmware": {"version": "2.0.2"},
+        }
+    ]
+    assert info["inference"] == {
+        "npu_driver_version": "1.8.1",
+        "driver": {"aries_version": "1.8.1", "regulus_version": "1.12.0"},
+    }

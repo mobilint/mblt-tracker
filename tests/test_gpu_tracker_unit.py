@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from mblt_tracker.device_tracker_gpu import GPUDeviceTracker
 
 
@@ -96,3 +98,19 @@ def test_get_static_info_returns_nvml_metadata() -> None:
     assert info["hardware"]["gpu"]["devices"] == [
         {"device_index": 0, "name": "NVIDIA Test GPU"}
     ]
+
+
+def test_get_static_info_decodes_nvml_bytes_for_json_serialization() -> None:
+    tracker = _make_tracker()
+    tracker.num_gpus = 1
+    tracker.driver_version = b"555.42"
+    tracker.cuda_version = 12040
+    tracker.device_name = {0: b"NVIDIA Test GPU"}
+
+    info = tracker.get_static_info()
+
+    assert info["inference"]["gpu"]["driver"]["version"] == "555.42"
+    assert info["hardware"]["gpu"]["devices"] == [
+        {"device_index": 0, "name": "NVIDIA Test GPU"}
+    ]
+    json.dumps(info)
