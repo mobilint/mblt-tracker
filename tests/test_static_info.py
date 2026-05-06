@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import mblt_tracker.static_info as static_info
 from mblt_tracker.static_info import (
+    _calculate_theoretical_bandwidth_gbps,
     _normalize_windows_power_plan_name,
+    _parse_linux_dmidecode_memory,
     _parse_windows_active_power_scheme,
     _parse_windows_power_setting_ac_value,
+    _read_dram_dimms_linux,
+    _read_dram_dimms_windows,
     get_pcie_static_info,
     get_windows_power_policy,
 )
@@ -12,6 +16,139 @@ from mblt_tracker.static_info import (
 
 def _write(path, value: str) -> None:
     path.write_text(value, encoding="utf-8")
+
+
+def test_read_dram_dimms_windows_parses_cim_json(monkeypatch) -> None:
+    output = """
+    [
+      {
+        "Manufacturer": "Samsung",
+        "PartNumber": "M378A1K43EB2-CWE   ",
+        "SerialNumber": "12345678",
+        "Capacity": "8589934592",
+        "Speed": 3200,
+        "ConfiguredClockSpeed": 3200,
+        "DataWidth": 64,
+        "TotalWidth": 72,
+        "SMBIOSMemoryType": 26
+      },
+      {
+        "Manufacturer": "SK Hynix",
+        "PartNumber": "HMA81GU6CJR8N-XN",
+        "SerialNumber": "87654321",
+        "Capacity": "8589934592",
+        "Speed": 3200,
+        "ConfiguredClockSpeed": 3200,
+        "DataWidth": 64,
+        "TotalWidth": 64,
+        "SMBIOSMemoryType": 26
+      }
+    ]
+    """
+
+    monkeypatch.setattr(static_info, "run_command", lambda _command: output)
+
+    dimms = _read_dram_dimms_windows()
+
+    assert dimms == [
+        {
+            "manufacturer": "Samsung",
+            "part_number": "M378A1K43EB2-CWE",
+            "serial_number": "12345678",
+            "capacity_bytes": 8589934592,
+            "speed_mhz": 3200,
+            "configured_speed_mhz": 3200,
+            "data_width_bits": 64,
+            "total_width_bits": 72,
+            "type": "DDR4",
+        },
+        {
+            "manufacturer": "SK Hynix",
+            "part_number": "HMA81GU6CJR8N-XN",
+            "serial_number": "87654321",
+            "capacity_bytes": 8589934592,
+            "speed_mhz": 3200,
+            "configured_speed_mhz": 3200,
+            "data_width_bits": 64,
+            "total_width_bits": 64,
+            "type": "DDR4",
+        },
+    ]
+
+
+def test_read_dram_dimms_windows_returns_empty_list_on_command_failure(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(static_info, "run_command", lambda _command: None)
+
+    assert _read_dram_dimms_windows() == []
+
+
+def test_parse_linux_dmidecode_memory() -> None:
+    output = """
+Handle 0x0038, DMI type 17, 40 bytes
+Memory Device
+        Total Width: 64 bits
+        Data Width: 64 bits
+        Size: 16 GB
+        Type: DDR5
+        Speed: 5600 MT/s
+        Manufacturer: Samsung
+        Serial Number: 12345678
+        Part Number: M425R2GA3BB0-CWM
+        Configured Memory Speed: 5600 MT/s
+
+Handle 0x0039, DMI type 17, 40 bytes
+Memory Device
+        Total Width: Unknown
+        Data Width: Unknown
+        Size: No Module Installed
+        Type: Unknown
+        Speed: Unknown
+        Manufacturer: Not Specified
+        Part Number: Not Specified
+    """
+
+    dimms = _parse_linux_dmidecode_memory(output)
+
+    assert dimms == [
+        {
+            "manufacturer": "Samsung",
+            "part_number": "M425R2GA3BB0-CWM",
+            "serial_number": "12345678",
+            "capacity_bytes": 16 * 1024**3,
+            "speed_mhz": 5600,
+            "configured_speed_mhz": 5600,
+            "data_width_bits": 64,
+            "total_width_bits": 64,
+            "type": "DDR5",
+        }
+    ]
+
+
+def test_read_dram_dimms_linux_returns_empty_list_on_command_failure(monkeypatch) -> None:
+    monkeypatch.setattr(static_info, "run_command", lambda _command: None)
+
+    assert _read_dram_dimms_linux() == []
+
+
+def test_calculate_theoretical_bandwidth_gbps() -> None:
+    dimms = [
+        {"configured_speed_mhz": 3200, "data_width_bits": 64},
+        {"configured_speed_mhz": 3200, "data_width_bits": 64},
+    ]
+
+    assert _calculate_theoretical_bandwidth_gbps(dimms) == 51.2
+
+
+def test_calculate_theoretical_bandwidth_gbps_falls_back_to_nominal_speed() -> None:
+    dimms = [{"speed_mhz": 5600, "data_width_bits": 64}]
+
+    assert _calculate_theoretical_bandwidth_gbps(dimms) == 44.8
+
+
+def test_calculate_theoretical_bandwidth_gbps_returns_none_without_required_fields() -> None:
+    assert _calculate_theoretical_bandwidth_gbps([{"speed_mhz": 3200}]) is None
 
 
 def test_get_pcie_static_info_reads_sysfs_and_selects_matching_device(

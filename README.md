@@ -126,11 +126,37 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
       "cpu": {
         "architecture": "AMD64",
         "logical_cores": 20,
-        "model_name": "Intel64 Family 6 Model 191 Stepping 2, GenuineIntel",
-        "physical_cores": 14
+        "model_name": "13th Gen Intel(R) Core(TM) i5-13500",
+        "physical_cores": 14,
+        "vendor": "GenuineIntel"
       },
       "dram": {
-        "available_bytes": 14576525312,
+        "available_bytes": 14081650688,
+        "dimms": [
+          {
+            "capacity_bytes": 17179869184,
+            "configured_speed_mhz": 5600,
+            "data_width_bits": 64,
+            "manufacturer": "Samsung",
+            "part_number": "M323R2GA3PB0-CWMOL",
+            "serial_number": "48A201A4",
+            "speed_mhz": 5600,
+            "total_width_bits": 64,
+            "type": "DDR5"
+          },
+          {
+            "capacity_bytes": 17179869184,
+            "configured_speed_mhz": 5600,
+            "data_width_bits": 64,
+            "manufacturer": "Samsung",
+            "part_number": "M323R2GA3PB0-CWMOL",
+            "serial_number": "48A201E5",
+            "speed_mhz": 5600,
+            "total_width_bits": 64,
+            "type": "DDR5"
+          }
+        ],
+        "theoretical_bandwidth_gbps": 89.6,
         "total_bytes": 34113015808
       }
     },
@@ -138,9 +164,15 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
       "gpus": [
         {
           "bus_address": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
+          "current_link_speed": "8.0 GT/s PCIe",
+          "current_link_width": "4",
           "dev_no": 0,
           "device_id": "0x2204",
+          "lane_width": "x4",
+          "link_generation": "Gen3",
           "manufacturer": "NVIDIA",
+          "max_link_speed": "16.0 GT/s PCIe",
+          "max_link_width": "16",
           "name": "NVIDIA GeForce RTX 3090",
           "pnp_device_id": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
           "revision": "0xa1",
@@ -153,9 +185,15 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
       "npus": [
         {
           "bus_address": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008",
+          "current_link_speed": "16.0 GT/s PCIe",
+          "current_link_width": "8",
           "dev_no": 0,
           "device_id": "0x0000",
+          "lane_width": "x8",
+          "link_generation": "Gen4",
           "manufacturer": "MOBILINT, Inc.",
+          "max_link_speed": "16.0 GT/s PCIe",
+          "max_link_width": "8",
           "name": "MOBILINT NPU Accelerator",
           "pnp_device_id": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008",
           "revision": "0x02",
@@ -168,6 +206,11 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
     }
   },
   "inference": {
+    "cpu": {
+      "max_processor_state_pct": 100,
+      "min_processor_state_pct": 100,
+      "power_plan": "High performance"
+    },
     "os": {
       "kernel_version": "11",
       "name": "Windows",

@@ -12,6 +12,7 @@ import psutil
 
 def get_host_static_info() -> dict[str, object]:
     """Collect best-effort host CPU, DRAM, and OS static information."""
+    virtual_memory = psutil.virtual_memory()
     info: dict[str, object] = {
         "hardware": {
             "host": {
@@ -21,8 +22,8 @@ def get_host_static_info() -> dict[str, object]:
                     "logical_cores": psutil.cpu_count(logical=True),
                 },
                 "dram": {
-                    "total_bytes": psutil.virtual_memory().total,
-                    "available_bytes": psutil.virtual_memory().available,
+                    "total_bytes": virtual_memory.total,
+                    "available_bytes": virtual_memory.available,
                 },
             }
         },
@@ -45,6 +46,19 @@ def get_host_static_info() -> dict[str, object]:
         info["hardware"]["host"]["cpu"]["model_name"] = model_name
     if vendor:
         info["hardware"]["host"]["cpu"]["vendor"] = vendor
+
+    if platform.system() == "Windows":
+        dimms = _read_dram_dimms_windows()
+    elif platform.system() == "Linux":
+        dimms = _read_dram_dimms_linux()
+    else:
+        dimms = []
+    if dimms:
+        dram = info["hardware"]["host"]["dram"]
+        dram["dimms"] = dimms
+        theoretical_bandwidth_gbps = _calculate_theoretical_bandwidth_gbps(dimms)
+        if theoretical_bandwidth_gbps is not None:
+            dram["theoretical_bandwidth_gbps"] = theoretical_bandwidth_gbps
 
     if platform.system() == "Linux":
         os_release = _read_os_release()
@@ -209,6 +223,202 @@ def _parse_windows_power_setting_ac_value(output: str) -> int | None:
         return int(match.group(1), 16)
     except ValueError:
         return None
+
+
+def _read_dram_dimms_windows() -> list[dict[str, object]]:
+    """Collect physical memory module information from Windows CIM."""
+    output = run_command(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "Get-CimInstance Win32_PhysicalMemory | "
+            "Select-Object Manufacturer,PartNumber,SerialNumber,Capacity,Speed,"
+            "ConfiguredClockSpeed,DataWidth,TotalWidth,SMBIOSMemoryType | "
+            "ConvertTo-Json -Depth 3",
+        ]
+    )
+    if output is None:
+        return []
+
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        return []
+
+    if isinstance(parsed, dict):
+        entries = [parsed]
+    elif isinstance(parsed, list):
+        entries = [entry for entry in parsed if isinstance(entry, dict)]
+    else:
+        return []
+
+    dimms = []
+    for entry in entries:
+        dimm = {
+            "manufacturer": _clean_dram_string(entry.get("Manufacturer")),
+            "part_number": _clean_dram_string(entry.get("PartNumber")),
+            "serial_number": _clean_dram_string(entry.get("SerialNumber")),
+            "capacity_bytes": _to_int(entry.get("Capacity")),
+            "speed_mhz": _to_int(entry.get("Speed")),
+            "configured_speed_mhz": _to_int(entry.get("ConfiguredClockSpeed")),
+            "data_width_bits": _to_int(entry.get("DataWidth")),
+            "total_width_bits": _to_int(entry.get("TotalWidth")),
+            "type": _windows_memory_type_to_text(entry.get("SMBIOSMemoryType")),
+        }
+        cleaned = {key: value for key, value in dimm.items() if value is not None}
+        if cleaned:
+            dimms.append(cleaned)
+    return dimms
+
+
+def _read_dram_dimms_linux() -> list[dict[str, object]]:
+    """Collect physical memory module information from Linux dmidecode."""
+    output = run_command(["dmidecode", "-t", "memory"])
+    if output is None:
+        return []
+    return _parse_linux_dmidecode_memory(output)
+
+
+def _parse_linux_dmidecode_memory(output: str) -> list[dict[str, object]]:
+    dimms = []
+    for section in re.split(r"\nHandle\s+", output):
+        if "Memory Device" not in section:
+            continue
+
+        fields = _parse_dmidecode_section_fields(section)
+        if fields.get("Size") in {None, "No Module Installed"}:
+            continue
+
+        dimm = {
+            "manufacturer": _clean_dram_string(fields.get("Manufacturer")),
+            "part_number": _clean_dram_string(fields.get("Part Number")),
+            "serial_number": _clean_dram_string(fields.get("Serial Number")),
+            "capacity_bytes": _parse_memory_size_to_bytes(fields.get("Size")),
+            "speed_mhz": _parse_memory_speed_to_mhz(fields.get("Speed")),
+            "configured_speed_mhz": _parse_memory_speed_to_mhz(
+                fields.get("Configured Memory Speed")
+            ),
+            "data_width_bits": _parse_memory_width_to_bits(fields.get("Data Width")),
+            "total_width_bits": _parse_memory_width_to_bits(fields.get("Total Width")),
+            "type": _clean_dram_string(fields.get("Type")),
+        }
+        cleaned = {key: value for key, value in dimm.items() if value is not None}
+        if cleaned:
+            dimms.append(cleaned)
+    return dimms
+
+
+def _parse_dmidecode_section_fields(section: str) -> dict[str, str]:
+    fields = {}
+    for line in section.splitlines():
+        if ":" not in line:
+            continue
+        key, value = [part.strip() for part in line.split(":", 1)]
+        if key:
+            fields[key] = value
+    return fields
+
+
+def _calculate_theoretical_bandwidth_gbps(
+    dimms: list[dict[str, object]],
+) -> float | None:
+    """Estimate peak DRAM bandwidth in GB/s from DIMM speed and data width."""
+    bandwidth_gbps = 0.0
+    for dimm in dimms:
+        speed = _to_int(dimm.get("configured_speed_mhz")) or _to_int(
+            dimm.get("speed_mhz")
+        )
+        data_width_bits = _to_int(dimm.get("data_width_bits"))
+        if speed is None or data_width_bits is None:
+            continue
+        bandwidth_gbps += speed * (data_width_bits / 8) / 1000
+
+    if bandwidth_gbps <= 0:
+        return None
+    return round(bandwidth_gbps, 2)
+
+
+def _windows_memory_type_to_text(value: object) -> str | None:
+    memory_type = _to_int(value)
+    if memory_type is None:
+        return None
+    memory_types = {
+        20: "DDR",
+        21: "DDR2",
+        24: "DDR3",
+        26: "DDR4",
+        34: "DDR5",
+    }
+    return memory_types.get(memory_type)
+
+
+def _parse_memory_size_to_bytes(value: str | None) -> int | None:
+    if value is None:
+        return None
+    match = re.search(r"([0-9]+)\s*([KMGT]B)", value, re.IGNORECASE)
+    if match is None:
+        return None
+    amount = int(match.group(1))
+    unit = match.group(2).upper()
+    multipliers = {
+        "KB": 1024,
+        "MB": 1024**2,
+        "GB": 1024**3,
+        "TB": 1024**4,
+    }
+    return amount * multipliers[unit]
+
+
+def _parse_memory_speed_to_mhz(value: str | None) -> int | None:
+    if value is None or value.strip().lower() == "unknown":
+        return None
+    match = re.search(r"([0-9]+)", value)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _parse_memory_width_to_bits(value: str | None) -> int | None:
+    if value is None or value.strip().lower() == "unknown":
+        return None
+    match = re.search(r"([0-9]+)", value)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _clean_dram_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or value.lower() in {
+        "unknown",
+        "not specified",
+        "not provided",
+        "none",
+        "to be filled by o.e.m.",
+    }:
+        return None
+    return value
+
+
+def _to_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
 
 
 def get_pcie_static_info(
