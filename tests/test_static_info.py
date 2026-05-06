@@ -741,6 +741,38 @@ def test_get_pcie_static_info_keeps_nested_firmware_metadata() -> None:
     assert npu_info["firmware"] == {"version": "2.0.3"}
 
 
+def test_get_pcie_static_info_preserves_original_npu_index_when_filtered() -> None:
+    info = get_pcie_static_info(
+        device_id="0000",
+        devices=[
+            {
+                "bus_address": "0000:01:00.0",
+                "vendor_id": "0x1ed5",
+                "device_id": "0x0100",
+                "class": "0x120000",
+            },
+            {
+                "bus_address": "0000:02:00.0",
+                "vendor_id": "0x209f",
+                "device_id": "0x0000",
+                "class": "0x120000",
+            },
+        ],
+    )
+
+    hardware = cast(dict[str, object], info["hardware"])
+    npus = cast(list[dict[str, object]], hardware["npus"])
+    assert npus == [
+        {
+            "dev_no": 1,
+            "bus_address": "0000:02:00.0",
+            "vendor_id": "0x209f",
+            "device_id": "0x0000",
+            "class": "0x120000",
+        }
+    ]
+
+
 def test_lspci_metadata_parses_machine_readable_output(monkeypatch) -> None:
     output = '0000:01:00.0 "3D controller [0302]" "NVIDIA Corporation [10de]" "AD102 [GeForce RTX 4090] [2684]"\n'
     monkeypatch.setattr(static_info, "run_command", lambda _command: output)

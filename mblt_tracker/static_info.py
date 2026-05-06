@@ -917,8 +917,10 @@ def get_pcie_static_info(
     npus = _find_all_npu_devices(devices, vendor_id, device_id, class_filter)
     inference_info: dict[str, object] = {}
     if npus:
+        npu_device_indices = _get_npu_device_indices(devices)
         formatted_npus = [
-            _format_pcie_device(device, dev_no) for dev_no, device in enumerate(npus)
+            _format_pcie_device(device, npu_device_indices.get(id(device), dev_no))
+            for dev_no, device in enumerate(npus)
         ]
         npu_driver_version = _pop_npu_driver_version(formatted_npus)
         if npu_driver_version is not None:
@@ -930,6 +932,16 @@ def get_pcie_static_info(
     if inference_info:
         info["inference"] = inference_info
     return info
+
+
+def _get_npu_device_indices(devices: list[dict[str, object]]) -> dict[int, int]:
+    """Return stable unfiltered NPU indices keyed by object identity."""
+    return {
+        id(device): index
+        for index, device in enumerate(
+            device for device in devices if _is_likely_npu_device(device)
+        )
+    }
 
 
 def get_all_pcie_devices() -> list[dict[str, object]]:
