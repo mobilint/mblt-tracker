@@ -621,7 +621,7 @@ def _read_windows_pci_link_properties(
         return {}
     else:
         quoted_ids = ",".join(
-            f"'{instance_id.replace("'", "''")}'" for instance_id in instance_ids
+            "'" + instance_id.replace("'", "''") + "'" for instance_id in instance_ids
         )
         device_expression = f"$instanceIds = @({quoted_ids}); $instanceIds | ForEach-Object {{ Get-PnpDevice -InstanceId $_ -ErrorAction SilentlyContinue }}"
 
