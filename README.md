@@ -473,7 +473,7 @@ Uses **NVML** (via `nvidia-ml-py`) for high-fidelity hardware monitoring.
 - **Features**: Tracks total system GPU usage or specific indices (e.g., `GPUDeviceTracker(gpu_id=[0, 1])`).
 - **Dependencies**: Requires NVIDIA Drivers and NVML library installed.
 - **Temperature**: Reads on-die GPU temperature through NVML.
-- **Static Info**: Reports NVML-discovered GPU devices, NVIDIA driver version, CUDA driver version, and PCIe link/device metadata when available.
+- **Static Info**: `GPUDeviceTracker.get_static_info()` reports the detected GPU count, tracked device names, NVIDIA driver version, and the raw NVML CUDA driver version. The `mblt-tracker collect` CLI provides richer NVML-discovered GPU metadata enriched with PCIe device/link information when available.
 
 ### Mobilint NPU
 
@@ -547,23 +547,24 @@ Static information is collected on a best-effort basis and may vary by platform 
 
 Typical fields include:
 
-- `hardware.host.cpu`: CPU architecture, model name, vendor, physical cores, logical cores
-- `hardware.host.dram`: total and available memory in bytes
-- `hardware.host.dram.dimms`: physical DIMM metadata from `dmidecode` when available. On Linux, sudo password is required.
+- `hardware.cpu`: CPU architecture, model name, vendor, physical cores, logical cores
+- `hardware.dram`: total and available memory in bytes
+- `hardware.dram.dimms`: physical DIMM metadata from `dmidecode` when available. On Linux, sudo password is required for the CLI to collect this interactively.
 - `inference.os`: OS name, version, and kernel version
 - `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
-- `hardware.gpus`: NVML-discovered NVIDIA GPU devices enriched with PCIe vendor/device IDs and link information where available
+- `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names
+- `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices enriched with PCIe vendor/device IDs and link information where available
 - `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, link information, and firmware metadata where available
-- `inference.gpu`: NVIDIA driver and CUDA driver versions
+- `inference.gpu`: NVIDIA driver and CUDA driver versions. The CLI normalizes the CUDA driver version as a string such as `"13.0"`; `GPUDeviceTracker.get_static_info()` returns the raw NVML CUDA driver integer.
 - `hardware.npus[].firmware`: per-NPU firmware metadata where available. Linux currently maps `mobilint-cli status` firmware rows by device order.
-- `inference.driver`: host Mobilint driver metadata parsed from `mobilint-cli status` or OS driver sources.
+- `inference.npu_driver_version`: host Mobilint NPU driver version when available. Linux may also include `inference.driver` with Aries/Regulus driver metadata parsed from `mobilint-cli status`.
 
 PCIe discovery supports:
 
 - **Linux**: `/sys/bus/pci/devices`
 - **Windows**: PowerShell/CIM/PnP PCI device queries
 
-For tests or custom environments, `MBLT_TRACKER_PCI_SYSFS` can override the Linux PCI sysfs root. NPU PCIe matching can be customized with `MBLT_TRACKER_NPU_PCI_VENDOR_ID`, `MBLT_TRACKER_NPU_PCI_DEVICE_ID`, and `MBLT_TRACKER_NPU_PCI_CLASS_FILTER`.
+For tests or custom environments, `MBLT_TRACKER_PCI_SYSFS` can override the Linux PCI sysfs root. `NPUDeviceTracker.get_static_info()` can customize NPU PCIe matching with `MBLT_TRACKER_NPU_PCI_VENDOR_ID`, `MBLT_TRACKER_NPU_PCI_DEVICE_ID`, and `MBLT_TRACKER_NPU_PCI_CLASS_FILTER`. The `mblt-tracker collect` CLI uses the corresponding `--pcie-vendor-id`, `--pcie-device-id`, and `--pcie-class-filter` flags.
 
 ---
 
