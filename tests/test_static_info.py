@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+
 import mblt_tracker.static_info as static_info
 from mblt_tracker.static_info import (
     _calculate_theoretical_bandwidth_gbps,
+    _read_windows_pci_link_properties,
     _normalize_windows_power_plan_name,
     _parse_linux_dmidecode_memory,
     _parse_windows_active_power_scheme,
@@ -10,6 +13,7 @@ from mblt_tracker.static_info import (
     _read_dram_dimms_linux,
     _read_dram_dimms_windows,
     get_pcie_static_info,
+    get_windows_npu_driver_firmware_info,
     get_windows_power_policy,
 )
 
@@ -382,3 +386,77 @@ def test_get_windows_power_policy_normalizes_builtin_plan_to_english(
         "min_processor_state_pct": 100,
         "max_processor_state_pct": 100,
     }
+
+
+def test_read_windows_pci_link_properties_includes_driver_and_firmware_metadata(
+    monkeypatch,
+) -> None:
+    instance_id = "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008"
+    output = json.dumps(
+        {
+            "InstanceId": instance_id,
+            "DEVPKEY_Device_DriverVersion": "1.8.1.1348",
+            "DEVPKEY_Device_DriverDate": "/Date(1774828800000)/",
+            "DEVPKEY_Device_DriverDesc": "MOBILINT NPU Accelerator",
+            "DEVPKEY_Device_DriverProvider": "MOBILINT, Inc.",
+            "DEVPKEY_Device_FirmwareVersion": None,
+            "DEVPKEY_Device_FirmwareRevision": "2.0.3",
+        }
+    )
+
+    monkeypatch.setattr(
+        static_info,
+        "run_command_with_timeout",
+        lambda _command, timeout: output,
+    )
+
+    properties = _read_windows_pci_link_properties()
+
+    device = properties[instance_id]
+    assert device["driver_version"] == "1.8.1.1348"
+    assert device["driver_date"] == "/Date(1774828800000)/"
+    assert device["driver_description"] == "MOBILINT NPU Accelerator"
+    assert device["driver_provider"] == "MOBILINT, Inc."
+    assert device["firmware_revision"] == "2.0.3"
+    assert "firmware_version" not in device
+
+
+def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(static_info.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        static_info,
+        "get_pcie_static_info",
+        lambda: {
+            "hardware": {
+                "pcie": {
+                    "npus": [
+                        {
+                            "dev_no": 0,
+                            "vendor_id": "0x209f",
+                            "name": "MOBILINT NPU Accelerator",
+                            "pnp_device_id": "PCI\\VEN_209F&DEV_0000",
+                            "driver_version": "1.8.1.1348",
+                            "driver_provider": "MOBILINT, Inc.",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    info = get_windows_npu_driver_firmware_info()
+
+    assert info["hardware"]["npu"] == {
+        "device_count": 1,
+        "devices": [
+            {
+                "device_index": 0,
+                "name": "MOBILINT NPU Accelerator",
+                "pnp_device_id": "PCI\\VEN_209F&DEV_0000",
+                "driver_version": "1.8.1.1348",
+                "driver_provider": "MOBILINT, Inc.",
+            }
+        ],
+    }
+    assert info["inference"]["driver"] == {"version": "1.8.1.1348"}
+    assert "firmware" not in info["inference"]

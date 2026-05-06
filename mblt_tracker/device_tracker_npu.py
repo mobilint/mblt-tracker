@@ -10,7 +10,12 @@ from typing import Optional
 import numpy as np
 
 from .device_tracker import BaseDeviceTracker
-from .static_info import _deep_merge, get_pcie_static_info, run_command
+from .static_info import (
+    _deep_merge,
+    get_pcie_static_info,
+    get_windows_npu_driver_firmware_info,
+    run_command,
+)
 
 
 class NPUDeviceTracker(BaseDeviceTracker):
@@ -296,9 +301,12 @@ class NPUDeviceTracker(BaseDeviceTracker):
             device_id=os.environ.get("MBLT_TRACKER_NPU_PCI_DEVICE_ID"),
             class_filter=os.environ.get("MBLT_TRACKER_NPU_PCI_CLASS_FILTER"),
         )
-        status_output = run_command(["mobilint-cli", "status"])
-        if status_output:
-            _deep_merge(info, _parse_mobilint_status_static_info(status_output))
+        if platform.system() == "Windows":
+            _deep_merge(info, get_windows_npu_driver_firmware_info())
+        else:
+            status_output = run_command(["mobilint-cli", "status"])
+            if status_output:
+                _deep_merge(info, _parse_mobilint_status_static_info(status_output))
         return info
 
     def get_util_trace(self) -> list[tuple[float, float]]:

@@ -96,6 +96,7 @@ def test_npu_get_static_info_uses_mobilint_pci_vendor_by_default(monkeypatch) ->
         "mblt_tracker.device_tracker_npu.get_pcie_static_info",
         fake_get_pcie_static_info,
     )
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.platform.system", lambda: "Linux")
     monkeypatch.setattr("mblt_tracker.device_tracker_npu.run_command", lambda command: None)
     monkeypatch.delenv("MBLT_TRACKER_NPU_PCI_VENDOR_ID", raising=False)
     monkeypatch.delenv("MBLT_TRACKER_NPU_PCI_DEVICE_ID", raising=False)
@@ -109,3 +110,34 @@ def test_npu_get_static_info_uses_mobilint_pci_vendor_by_default(monkeypatch) ->
         "device_id": None,
         "class_filter": None,
     }
+
+
+def test_npu_get_static_info_uses_windows_pnp_metadata_without_mobilint_cli(
+    monkeypatch,
+) -> None:
+    tracker = object.__new__(NPUDeviceTracker)
+    commands = []
+
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "mblt_tracker.device_tracker_npu.get_pcie_static_info",
+        lambda vendor_id=None, device_id=None, class_filter=None: {
+            "hardware": {"pcie": {"npus": [{"vendor_id": "0x209f"}]}}
+        },
+    )
+    monkeypatch.setattr(
+        "mblt_tracker.device_tracker_npu.get_windows_npu_driver_firmware_info",
+        lambda: {"inference": {"driver": {"version": "1.8.1.1348"}}},
+    )
+    monkeypatch.setattr(
+        "mblt_tracker.device_tracker_npu.run_command",
+        lambda command: commands.append(command) or None,
+    )
+
+    info = tracker.get_static_info()
+
+    assert info == {
+        "hardware": {"pcie": {"npus": [{"vendor_id": "0x209f"}]}},
+        "inference": {"driver": {"version": "1.8.1.1348"}},
+    }
+    assert commands == []

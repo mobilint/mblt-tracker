@@ -58,3 +58,33 @@ def test_collect_writes_static_info_to_output_file(monkeypatch, tmp_path, capsys
     assert json.loads(output.read_text(encoding="utf-8")) == {
         "hardware": {"pcie": {"npus": [{"vendor_id": "0x1ed5"}]}}
     }
+
+
+def test_collect_static_info_merges_windows_npu_driver_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "get_host_static_info",
+        lambda: {"hardware": {"host": {"cpu": {"architecture": "AMD64"}}}},
+    )
+    monkeypatch.setattr(
+        cli,
+        "get_pcie_static_info",
+        lambda **_kwargs: {
+            "hardware": {"pcie": {"npus": [{"vendor_id": "0x209f"}]}}
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "get_windows_npu_driver_firmware_info",
+        lambda: {"inference": {"driver": {"version": "1.8.1.1348"}}},
+    )
+
+    info = cli.collect_static_info()
+
+    assert info == {
+        "hardware": {
+            "host": {"cpu": {"architecture": "AMD64"}},
+            "pcie": {"npus": [{"vendor_id": "0x209f"}]},
+        },
+        "inference": {"driver": {"version": "1.8.1.1348"}},
+    }

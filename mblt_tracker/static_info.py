@@ -500,7 +500,6 @@ def _read_pcie_devices_windows() -> list[dict[str, object]]:
     else:
         return []
 
-    link_properties = _read_windows_pci_link_properties()
     devices = []
     for entity in entities:
         pnp_device_id = str(entity.get("PNPDeviceID") or entity.get("DeviceID") or "")
@@ -520,13 +519,39 @@ def _read_pcie_devices_windows() -> list[dict[str, object]]:
                 "status": status,
             }
         )
-        device.update(link_properties.get(pnp_device_id.upper(), {}))
         devices.append({key: value for key, value in device.items() if value})
+
+    relevant_instance_ids = [
+        str(device["pnp_device_id"])
+        for device in devices
+        if device.get("pnp_device_id") is not None and _is_relevant_pcie_device(device)
+    ]
+    link_properties = _read_windows_pci_link_properties(relevant_instance_ids)
+    for device in devices:
+        pnp_device_id = str(device.get("pnp_device_id", ""))
+        device.update(link_properties.get(pnp_device_id.upper(), {}))
     return devices
 
 
-def _read_windows_pci_link_properties() -> dict[str, dict[str, object]]:
-    """Read PCIe link properties for all Windows PCI devices in one call."""
+def _read_windows_pci_link_properties(
+    instance_ids: list[str] | None = None,
+) -> dict[str, dict[str, object]]:
+    """Read PCIe/PnP properties for selected Windows PCI devices.
+
+    Querying every PCI device can be slow on some systems, so production code
+    passes only relevant GPU/NPU/accelerator instance IDs. ``None`` keeps the
+    previous all-PCI behavior for tests and fallback callers.
+    """
+    if instance_ids is None:
+        device_expression = "Get-PnpDevice -InstanceId 'PCI\\*'"
+    elif not instance_ids:
+        return {}
+    else:
+        quoted_ids = ",".join(
+            f"'{instance_id.replace("'", "''")}'" for instance_id in instance_ids
+        )
+        device_expression = f"$instanceIds = @({quoted_ids}); $instanceIds | ForEach-Object {{ Get-PnpDevice -InstanceId $_ -ErrorAction SilentlyContinue }}"
+
     output = run_command_with_timeout(
         [
             "powershell",
@@ -538,9 +563,15 @@ def _read_windows_pci_link_properties() -> dict[str, dict[str, object]]:
             "'DEVPKEY_PciDevice_CurrentLinkSpeed',"
             "'DEVPKEY_PciDevice_CurrentLinkWidth',"
             "'DEVPKEY_PciDevice_MaxLinkSpeed',"
-            "'DEVPKEY_PciDevice_MaxLinkWidth'"
+            "'DEVPKEY_PciDevice_MaxLinkWidth',"
+            "'DEVPKEY_Device_DriverVersion',"
+            "'DEVPKEY_Device_DriverDate',"
+            "'DEVPKEY_Device_DriverDesc',"
+            "'DEVPKEY_Device_DriverProvider',"
+            "'DEVPKEY_Device_FirmwareVersion',"
+            "'DEVPKEY_Device_FirmwareRevision'"
             "); "
-            r"Get-PnpDevice -InstanceId 'PCI\*' | "
+            f"{device_expression} | "
             "ForEach-Object { "
             "$item = [ordered]@{ InstanceId = $_.InstanceId }; "
             "foreach ($key in $keys) { "
@@ -593,9 +624,126 @@ def _read_windows_pci_link_properties() -> dict[str, dict[str, object]]:
         if max_width is not None:
             device_properties["max_link_width"] = str(max_width)
 
+        driver_version = _clean_windows_device_property(
+            entry.get("DEVPKEY_Device_DriverVersion")
+        )
+        driver_date = _clean_windows_device_property(
+            entry.get("DEVPKEY_Device_DriverDate")
+        )
+        driver_description = _clean_windows_device_property(
+            entry.get("DEVPKEY_Device_DriverDesc")
+        )
+        driver_provider = _clean_windows_device_property(
+            entry.get("DEVPKEY_Device_DriverProvider")
+        )
+        firmware_version = _clean_windows_device_property(
+            entry.get("DEVPKEY_Device_FirmwareVersion")
+        )
+        firmware_revision = _clean_windows_device_property(
+            entry.get("DEVPKEY_Device_FirmwareRevision")
+        )
+
+        if driver_version is not None:
+            device_properties["driver_version"] = driver_version
+        if driver_date is not None:
+            device_properties["driver_date"] = driver_date
+        if driver_description is not None:
+            device_properties["driver_description"] = driver_description
+        if driver_provider is not None:
+            device_properties["driver_provider"] = driver_provider
+        if firmware_version is not None:
+            device_properties["firmware_version"] = firmware_version
+        if firmware_revision is not None:
+            device_properties["firmware_revision"] = firmware_revision
+
         if device_properties:
             properties[instance_id.upper()] = device_properties
     return properties
+
+
+def get_windows_npu_driver_firmware_info(
+    vendor_ids: tuple[str, ...] = ("1ed5", "209f"),
+) -> dict[str, object]:
+    """Collect Windows NPU driver and firmware metadata from PnP properties.
+
+    This avoids calling ``mobilint-cli``. Driver metadata is exposed by Windows
+    through standard PnP device properties. Firmware metadata is best-effort:
+    it is returned only when the installed device driver publishes standard
+    firmware-related properties.
+    """
+    if platform.system() != "Windows":
+        return {}
+
+    pcie_info = get_pcie_static_info()
+    npus = (
+        pcie_info.get("hardware", {})
+        .get("pcie", {})
+        .get("npus", [])
+    )
+    if not isinstance(npus, list):
+        return {}
+
+    normalized_vendor_ids = {_normalize_hex(vendor_id) for vendor_id in vendor_ids}
+    devices = []
+    driver_versions = []
+    firmware_versions = []
+    for npu in npus:
+        if not isinstance(npu, dict):
+            continue
+        vendor_id = _normalize_hex(str(npu.get("vendor_id", "")))
+        if vendor_id not in normalized_vendor_ids:
+            continue
+
+        device: dict[str, object] = {}
+        for source_key, target_key in (
+            ("dev_no", "device_index"),
+            ("name", "name"),
+            ("pnp_device_id", "pnp_device_id"),
+            ("driver_version", "driver_version"),
+            ("driver_date", "driver_date"),
+            ("driver_description", "driver_description"),
+            ("driver_provider", "driver_provider"),
+            ("firmware_version", "firmware_version"),
+            ("firmware_revision", "firmware_revision"),
+        ):
+            if npu.get(source_key) is not None:
+                device[target_key] = npu[source_key]
+        if device:
+            devices.append(device)
+
+        driver_version = npu.get("driver_version")
+        if isinstance(driver_version, str) and driver_version:
+            driver_versions.append(driver_version)
+        firmware_version = npu.get("firmware_version") or npu.get("firmware_revision")
+        if isinstance(firmware_version, str) and firmware_version:
+            firmware_versions.append(firmware_version)
+
+    info: dict[str, object] = {}
+    if devices:
+        info.setdefault("hardware", {})["npu"] = {
+            "device_count": len(devices),
+            "devices": devices,
+        }
+    if driver_versions:
+        driver_info: dict[str, object] = {"version": driver_versions[0]}
+        if len(driver_versions) > 1:
+            driver_info["versions"] = driver_versions
+        info.setdefault("inference", {})["driver"] = driver_info
+    if firmware_versions:
+        firmware_info: dict[str, object] = {"version": firmware_versions[0]}
+        if len(firmware_versions) > 1:
+            firmware_info["versions"] = firmware_versions
+        info.setdefault("inference", {})["firmware"] = firmware_info
+    return info
+
+
+def _clean_windows_device_property(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    return str(value)
 
 
 def _windows_link_speed_to_text(value: object) -> str | None:
@@ -725,6 +873,12 @@ def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, obj
         "status",
         "pnp_device_id",
         "revision",
+        "driver_version",
+        "driver_date",
+        "driver_description",
+        "driver_provider",
+        "firmware_version",
+        "firmware_revision",
         "current_link_speed",
         "current_link_width",
         "max_link_speed",

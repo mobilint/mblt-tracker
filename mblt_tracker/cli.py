@@ -6,7 +6,12 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence, TextIO
 
-from .static_info import _deep_merge, get_host_static_info, get_pcie_static_info
+from .static_info import (
+    _deep_merge,
+    get_host_static_info,
+    get_pcie_static_info,
+    get_windows_npu_driver_firmware_info,
+)
 
 
 def collect_static_info(
@@ -26,6 +31,7 @@ def collect_static_info(
             include_all_devices=all_pcie_devices,
         ),
     )
+    _deep_merge(info, get_windows_npu_driver_firmware_info())
     return info
 
 
