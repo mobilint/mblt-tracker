@@ -38,20 +38,79 @@ def collect_static_info(
         ),
     )
     pcie_devices = get_all_pcie_devices()
+    pcie_info = get_pcie_static_info(
+        vendor_id=pcie_vendor_id,
+        device_id=pcie_device_id,
+        class_filter=pcie_class_filter,
+        include_all_devices=all_pcie_devices,
+        devices=pcie_devices,
+    )
+    npu_metadata_filter = (
+        _extract_hardware_npus(pcie_info)
+        if _has_pcie_filter(pcie_vendor_id, pcie_device_id, pcie_class_filter)
+        else None
+    )
+    _deep_merge(info, pcie_info)
     _deep_merge(
         info,
-        get_pcie_static_info(
+        get_nvml_gpu_static_info(pcie_devices=pcie_devices),
+    )
+    _deep_merge(
+        info,
+        _collect_windows_npu_metadata(
             vendor_id=pcie_vendor_id,
             device_id=pcie_device_id,
             class_filter=pcie_class_filter,
-            include_all_devices=all_pcie_devices,
             devices=pcie_devices,
+            filtered_npus=npu_metadata_filter,
         ),
     )
-    _deep_merge(info, get_nvml_gpu_static_info(pcie_devices=pcie_devices))
-    _deep_merge(info, get_windows_npu_driver_firmware_info())
-    _deep_merge(info, get_linux_npu_driver_firmware_info())
+    _deep_merge(
+        info,
+        _collect_linux_npu_metadata(npu_metadata_filter),
+    )
     return cast(CollectOutput, _clean_typed_dict(info, CollectOutput))
+
+
+def _has_pcie_filter(
+    vendor_id: Optional[str], device_id: Optional[str], class_filter: Optional[str]
+) -> bool:
+    return any(value is not None for value in (vendor_id, device_id, class_filter))
+
+
+def _extract_hardware_npus(info: Mapping[str, object]) -> list[dict[str, object]]:
+    hardware = info.get("hardware")
+    if not isinstance(hardware, Mapping):
+        return []
+    npus = hardware.get("npus")
+    if not isinstance(npus, list):
+        return []
+    return [dict(npu) for npu in npus if isinstance(npu, dict)]
+
+
+def _collect_windows_npu_metadata(
+    vendor_id: Optional[str],
+    device_id: Optional[str],
+    class_filter: Optional[str],
+    devices: list[dict[str, object]],
+    filtered_npus: Optional[list[dict[str, object]]],
+) -> dict[str, object]:
+    if filtered_npus == []:
+        return {}
+    return get_windows_npu_driver_firmware_info(
+        vendor_id=vendor_id,
+        device_id=device_id,
+        class_filter=class_filter,
+        devices=devices,
+    )
+
+
+def _collect_linux_npu_metadata(
+    filtered_npus: Optional[list[dict[str, object]]],
+) -> dict[str, object]:
+    if filtered_npus == []:
+        return {}
+    return get_linux_npu_driver_firmware_info(npu_devices=filtered_npus)
 
 
 def build_parser() -> argparse.ArgumentParser:

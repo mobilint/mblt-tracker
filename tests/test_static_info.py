@@ -14,6 +14,7 @@ from mblt_tracker.static_info import (
     _get_python_package_version,
     get_cpu_power_policy,
     get_nvml_gpu_static_info,
+    get_linux_npu_driver_firmware_info,
     _parse_nvcc_cuda_version,
     _read_windows_pci_link_properties,
     _normalize_windows_power_plan_name,
@@ -310,6 +311,21 @@ def test_get_python_package_version_returns_none_when_not_installed(monkeypatch)
     monkeypatch.setitem(sys.modules, "qbcompiler", None)
 
     assert _get_python_package_version("qbcompiler") is None
+
+
+def test_get_python_package_version_returns_none_on_import_runtime_failure(
+    monkeypatch,
+) -> None:
+    real_import = __import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "qbruntime":
+            raise OSError("missing native dependency")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(static_info, "__import__", fake_import, raising=False)
+
+    assert _get_python_package_version("qbruntime") is None
 
 
 def test_read_dram_dimms_windows_parses_cim_json(monkeypatch) -> None:
@@ -982,7 +998,7 @@ def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> 
     monkeypatch.setattr(
         static_info,
         "get_pcie_static_info",
-        lambda: {
+        lambda **_kwargs: {
             "hardware": {
                 "npus": [
                     {
@@ -1010,3 +1026,67 @@ def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> 
         }
     ]
     assert info["inference"] == {"npu_driver_version": "1.8.1.1348"}
+
+
+def test_get_windows_npu_driver_firmware_info_honors_pcie_filters(monkeypatch) -> None:
+    monkeypatch.setattr(static_info.platform, "system", lambda: "Windows")
+    captured: dict[str, object] = {}
+    pcie_devices = [{"vendor_id": "0x1ed5", "device_id": "0x0100"}]
+
+    def fake_get_pcie_static_info(**kwargs):
+        captured.update(kwargs)
+        return {"hardware": {"npus": [{"vendor_id": "0x1ed5"}]}}
+
+    monkeypatch.setattr(static_info, "get_pcie_static_info", fake_get_pcie_static_info)
+
+    get_windows_npu_driver_firmware_info(
+        vendor_id="1ed5",
+        device_id="0100",
+        class_filter="0x12",
+        devices=pcie_devices,
+    )
+
+    assert captured == {
+        "vendor_id": "1ed5",
+        "device_id": "0100",
+        "class_filter": "0x12",
+        "devices": pcie_devices,
+    }
+
+
+def test_get_linux_npu_driver_firmware_info_skips_when_filtered_npus_empty(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(static_info.platform, "system", lambda: "Linux")
+
+    def fail_run_command(_command):
+        raise AssertionError("mobilint-cli status should not be called")
+
+    monkeypatch.setattr(static_info, "run_command", fail_run_command)
+
+    assert get_linux_npu_driver_firmware_info(npu_devices=[]) == {}
+
+
+def test_get_linux_npu_driver_firmware_info_limits_metadata_to_filtered_npus(
+    monkeypatch,
+) -> None:
+    status_output = """
+Drivers - Aries: 1.8.1 Regulus: 1.12.0 |
+| 0 Aries(Board-A) | 42 C 2.0.1 |
+| 0 42 C 2.0.1 |
+| 1 Aries(Board-B) | 43 C 2.0.2 |
+| 1 43 C 2.0.2 |
+"""
+    monkeypatch.setattr(static_info.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(static_info, "run_command", lambda _command: status_output)
+
+    info = get_linux_npu_driver_firmware_info(npu_devices=[{"dev_no": 0}])
+
+    hardware = cast(dict[str, object], info["hardware"])
+    assert hardware["npus"] == [
+        {"dev_no": 0, "board_name": "Board-A", "firmware": {"version": "2.0.1"}}
+    ]
+    assert info["inference"] == {
+        "npu_driver_version": "1.8.1",
+        "driver": {"aries_version": "1.8.1", "regulus_version": "1.12.0"},
+    }

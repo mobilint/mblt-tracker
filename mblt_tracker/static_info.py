@@ -396,7 +396,7 @@ def _get_python_package_version(module_name: str) -> str | None:
     """
     try:
         module = __import__(module_name)
-    except ImportError:
+    except Exception:
         return None
 
     version = getattr(module, "__version__", None)
@@ -661,14 +661,33 @@ def _read_dram_dimms_linux(
     return _parse_linux_dmidecode_memory(output)
 
 
-def get_linux_npu_driver_firmware_info() -> dict[str, object]:
+def get_linux_npu_driver_firmware_info(
+    npu_devices: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
     """Collect Linux NPU driver/firmware metadata from mobilint-cli status."""
     if platform.system() != "Linux":
+        return {}
+    if npu_devices is not None and not npu_devices:
         return {}
     status_output = run_command(["mobilint-cli", "status"])
     if not status_output:
         return {}
-    return parse_mobilint_status_static_info(status_output)
+    info = parse_mobilint_status_static_info(status_output)
+    if npu_devices is not None:
+        _limit_npu_metadata_to_filtered_devices(info, len(npu_devices))
+    return info
+
+
+def _limit_npu_metadata_to_filtered_devices(
+    info: dict[str, object], npu_count: int
+) -> None:
+    hardware = info.get("hardware")
+    if not isinstance(hardware, dict):
+        return
+    npus = hardware.get("npus")
+    if not isinstance(npus, list):
+        return
+    hardware["npus"] = npus[:npu_count]
 
 
 def parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
@@ -1113,6 +1132,10 @@ def _read_windows_pci_link_properties(
 
 def get_windows_npu_driver_firmware_info(
     vendor_ids: tuple[str, ...] = ("1ed5", "209f"),
+    vendor_id: str | None = None,
+    device_id: str | None = None,
+    class_filter: str | None = None,
+    devices: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Collect Windows NPU driver metadata from PnP properties.
 
@@ -1123,7 +1146,12 @@ def get_windows_npu_driver_firmware_info(
     if platform.system() != "Windows":
         return {}
 
-    pcie_info = get_pcie_static_info()
+    pcie_info = get_pcie_static_info(
+        vendor_id=vendor_id,
+        device_id=device_id,
+        class_filter=class_filter,
+        devices=devices,
+    )
     hardware = pcie_info.get("hardware", {})
     if not isinstance(hardware, dict):
         return {}
