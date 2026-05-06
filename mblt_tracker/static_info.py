@@ -9,7 +9,7 @@ import subprocess
 import sys
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Mapping, Sequence, cast
+from typing import Any, Callable, Mapping, Sequence, cast
 
 import psutil
 
@@ -21,7 +21,10 @@ from ._types import (
 )
 
 
-def get_host_static_info(sudo_password: str | None = None) -> CollectOutput:
+def get_host_static_info(
+    sudo_password: str | None = None,
+    sudo_password_provider: Callable[[], str] | None = None,
+) -> CollectOutput:
     """Collect best-effort host CPU, DRAM, and OS static information."""
     virtual_memory = psutil.virtual_memory()
     info: CollectOutput = {
@@ -71,7 +74,10 @@ def get_host_static_info(sudo_password: str | None = None) -> CollectOutput:
     if platform.system() == "Windows":
         dimms = _read_dram_dimms_windows()
     elif platform.system() == "Linux":
-        dimms = _read_dram_dimms_linux(sudo_password=sudo_password)
+        dimms = _read_dram_dimms_linux(
+            sudo_password=sudo_password,
+            sudo_password_provider=sudo_password_provider,
+        )
     else:
         dimms = []
     if dimms:
@@ -625,19 +631,23 @@ def _read_dram_dimms_windows() -> list[dict[str, object]]:
 
 def _read_dram_dimms_linux(
     sudo_password: str | None = None,
+    sudo_password_provider: Callable[[], str] | None = None,
 ) -> list[dict[str, object]]:
     """Collect physical memory module information from Linux dmidecode.
 
     ``dmidecode`` normally requires root privileges. Try the direct command
-    first. When a sudo password is supplied, pass it to ``sudo -S`` so the
-    public ``mblt-tracker collect`` command can collect richer output without
-    requiring users to run the whole CLI through sudo. Without a supplied
-    password, keep the best-effort non-interactive sudo fallback for library
-    callers. If all attempts fail, callers add a permission note to the public
-    output.
+    first. When a sudo password is supplied, pass it to ``sudo -S`` so callers
+    can collect richer output without requiring users to run the whole CLI
+    through sudo. When a password provider is supplied, defer calling it until
+    after the unprivileged command fails so interactive collection does not
+    prompt unnecessarily. Without either, keep the best-effort non-interactive
+    sudo fallback for library callers. If all attempts fail, callers add a
+    permission note to the public output.
     """
     output = run_command(["dmidecode", "-t", "memory"])
     if output is None:
+        if sudo_password is None and sudo_password_provider is not None:
+            sudo_password = sudo_password_provider()
         if sudo_password is not None:
             output = run_command_with_input(
                 ["sudo", "-S", "-p", "", "dmidecode", "-t", "memory"],

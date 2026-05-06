@@ -6,7 +6,7 @@ import json
 import platform
 import sys
 from pathlib import Path
-from typing import Any, Mapping, Optional, Sequence, TextIO, cast
+from typing import Any, Callable, Mapping, Optional, Sequence, TextIO, cast
 
 from ._types import CollectOutput
 from .static_info import (
@@ -27,9 +27,16 @@ def collect_static_info(
     pcie_class_filter: Optional[str] = None,
     all_pcie_devices: bool = False,
     sudo_password: Optional[str] = None,
+    sudo_password_provider: Optional[Callable[[], str]] = None,
 ) -> CollectOutput:
     """Collect best-effort static host and PCIe information."""
-    info = cast(dict[str, object], get_host_static_info(sudo_password=sudo_password))
+    info = cast(
+        dict[str, object],
+        get_host_static_info(
+            sudo_password=sudo_password,
+            sudo_password_provider=sudo_password_provider,
+        ),
+    )
     pcie_devices = get_all_pcie_devices()
     _deep_merge(
         info,
@@ -99,15 +106,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "collect":
-        sudo_password = None
+        sudo_password_provider = None
         if platform.system() == "Linux" and sys.stdin.isatty():
-            sudo_password = getpass.getpass("[sudo] password for dmidecode: ")
+            sudo_password_provider = lambda: getpass.getpass(
+                "[sudo] password for dmidecode: "
+            )
         info = collect_static_info(
             pcie_vendor_id=args.pcie_vendor_id,
             pcie_device_id=args.pcie_device_id,
             pcie_class_filter=args.pcie_class_filter,
             all_pcie_devices=args.all_pcie_devices,
-            sudo_password=sudo_password,
+            sudo_password_provider=sudo_password_provider,
         )
         _write_json(info, args.output, sys.stdout)
         return 0

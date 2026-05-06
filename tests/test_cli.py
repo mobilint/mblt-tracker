@@ -15,19 +15,23 @@ class FakeStdin:
 
 def test_collect_prints_static_info_as_json(monkeypatch, capsys) -> None:
     def fake_collect_static_info(**kwargs):
+        sudo_password_provider = kwargs.pop("sudo_password_provider")
+        assert callable(sudo_password_provider)
         assert kwargs == {
             "pcie_vendor_id": None,
             "pcie_device_id": None,
             "pcie_class_filter": None,
             "all_pcie_devices": False,
-            "sudo_password": "secret",
         }
         return {"hardware": {"cpu": {"architecture": "x86_64"}}}
+
+    def fail_getpass(_prompt):
+        raise AssertionError("getpass should be deferred until dmidecode fails")
 
     monkeypatch.setattr(cli, "collect_static_info", fake_collect_static_info)
     monkeypatch.setattr(cli.platform, "system", lambda: "Linux")
     monkeypatch.setattr(cli.sys, "stdin", FakeStdin(is_tty=True))
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt: "secret")
+    monkeypatch.setattr(cli.getpass, "getpass", fail_getpass)
 
     exit_code = cli.main(["collect"])
 
@@ -39,19 +43,23 @@ def test_collect_prints_static_info_as_json(monkeypatch, capsys) -> None:
 
 def test_collect_writes_static_info_to_output_file(monkeypatch, tmp_path, capsys) -> None:
     def fake_collect_static_info(**kwargs):
+        sudo_password_provider = kwargs.pop("sudo_password_provider")
+        assert callable(sudo_password_provider)
         assert kwargs == {
             "pcie_vendor_id": "1ed5",
             "pcie_device_id": "0100",
             "pcie_class_filter": "0x12",
             "all_pcie_devices": True,
-            "sudo_password": "secret",
         }
         return {"hardware": {"npus": [{"vendor_id": "0x1ed5"}]}}
+
+    def fail_getpass(_prompt):
+        raise AssertionError("getpass should be deferred until dmidecode fails")
 
     monkeypatch.setattr(cli, "collect_static_info", fake_collect_static_info)
     monkeypatch.setattr(cli.platform, "system", lambda: "Linux")
     monkeypatch.setattr(cli.sys, "stdin", FakeStdin(is_tty=True))
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt: "secret")
+    monkeypatch.setattr(cli.getpass, "getpass", fail_getpass)
     output = tmp_path / "nested" / "static_info.json"
 
     exit_code = cli.main(
@@ -83,7 +91,7 @@ def test_collect_skips_sudo_prompt_when_non_interactive(monkeypatch, capsys) -> 
             "pcie_device_id": None,
             "pcie_class_filter": None,
             "all_pcie_devices": False,
-            "sudo_password": None,
+            "sudo_password_provider": None,
         }
         return {"hardware": {"cpu": {"architecture": "x86_64"}}}
 
@@ -107,7 +115,9 @@ def test_collect_static_info_merges_windows_npu_driver_metadata(monkeypatch) -> 
     monkeypatch.setattr(
         cli,
         "get_host_static_info",
-        lambda sudo_password=None: {"hardware": {"cpu": {"architecture": "AMD64"}}},
+        lambda sudo_password=None, sudo_password_provider=None: {
+            "hardware": {"cpu": {"architecture": "AMD64"}}
+        },
     )
     monkeypatch.setattr(
         cli,
@@ -145,7 +155,9 @@ def test_collect_static_info_merges_linux_npu_driver_firmware_metadata(
     monkeypatch.setattr(
         cli,
         "get_host_static_info",
-        lambda sudo_password=None: {"hardware": {"cpu": {"architecture": "x86_64"}}},
+        lambda sudo_password=None, sudo_password_provider=None: {
+            "hardware": {"cpu": {"architecture": "x86_64"}}
+        },
     )
     monkeypatch.setattr(
         cli,

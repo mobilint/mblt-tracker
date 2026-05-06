@@ -459,6 +459,41 @@ Memory Device
     assert dimms[0]["manufacturer"] == "Samsung"
 
 
+def test_read_dram_dimms_linux_skips_password_provider_when_direct_succeeds(
+    monkeypatch,
+) -> None:
+    output = """
+Handle 0x0038, DMI type 17, 40 bytes
+Memory Device
+        Total Width: 64 bits
+        Data Width: 64 bits
+        Size: 16 GB
+        Type: DDR5
+        Speed: 5600 MT/s
+        Manufacturer: Samsung
+        Serial Number: 12345678
+        Part Number: M425R2GA3BB0-CWM
+        Configured Memory Speed: 5600 MT/s
+    """
+    commands = []
+
+    def fake_run_command(command):
+        commands.append(command)
+        if command == ["dmidecode", "-t", "memory"]:
+            return output
+        return None
+
+    def fail_password_provider():
+        raise AssertionError("password provider should not be called")
+
+    monkeypatch.setattr(static_info, "run_command", fake_run_command)
+
+    dimms = _read_dram_dimms_linux(sudo_password_provider=fail_password_provider)
+
+    assert commands == [["dmidecode", "-t", "memory"]]
+    assert dimms[0]["manufacturer"] == "Samsung"
+
+
 def test_read_dram_dimms_linux_uses_password_for_sudo(monkeypatch) -> None:
     output = """
 Handle 0x0038, DMI type 17, 40 bytes
@@ -487,6 +522,44 @@ Memory Device
     monkeypatch.setattr(static_info, "run_command_with_input", fake_run_command_with_input)
 
     dimms = _read_dram_dimms_linux(sudo_password="secret")
+
+    assert commands == [
+        (["dmidecode", "-t", "memory"], None, None),
+        (["sudo", "-S", "-p", "", "dmidecode", "-t", "memory"], "secret\n", 30),
+    ]
+    assert dimms[0]["manufacturer"] == "Samsung"
+
+
+def test_read_dram_dimms_linux_defers_password_provider_until_direct_fails(
+    monkeypatch,
+) -> None:
+    output = """
+Handle 0x0038, DMI type 17, 40 bytes
+Memory Device
+        Total Width: 64 bits
+        Data Width: 64 bits
+        Size: 16 GB
+        Type: DDR5
+        Speed: 5600 MT/s
+        Manufacturer: Samsung
+        Serial Number: 12345678
+        Part Number: M425R2GA3BB0-CWM
+        Configured Memory Speed: 5600 MT/s
+    """
+    commands = []
+
+    def fake_run_command(command):
+        commands.append((command, None, None))
+        return None
+
+    def fake_run_command_with_input(command, input_text, timeout):
+        commands.append((command, input_text, timeout))
+        return output
+
+    monkeypatch.setattr(static_info, "run_command", fake_run_command)
+    monkeypatch.setattr(static_info, "run_command_with_input", fake_run_command_with_input)
+
+    dimms = _read_dram_dimms_linux(sudo_password_provider=lambda: "secret")
 
     assert commands == [
         (["dmidecode", "-t", "memory"], None, None),
