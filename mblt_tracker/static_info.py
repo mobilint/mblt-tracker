@@ -178,6 +178,7 @@ def get_nvml_gpu_static_info(
             handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
             name = _decode_nvml_string(pynvml.nvmlDeviceGetName(handle))
             bus_address = _get_nvml_pci_bus_address(pynvml, handle)
+            nvml_static_metadata = _get_nvml_device_static_metadata(pynvml, handle)
             matched_pcie = _find_matching_pcie_gpu(
                 pcie_gpu_candidates,
                 bus_address,
@@ -186,8 +187,15 @@ def get_nvml_gpu_static_info(
             gpu_entry = dict(matched_pcie) if matched_pcie is not None else {}
             gpu_entry["name"] = name
             gpu_entry["driver_version"] = driver_version
+            gpu_entry.update(nvml_static_metadata)
             if bus_address is not None:
                 gpu_entry["bus_address"] = bus_address
+            pcie_link_mismatch = _compare_nvml_and_pcie_link_info(
+                nvml_static_metadata,
+                matched_pcie,
+            )
+            if pcie_link_mismatch is not None:
+                gpu_entry["pcie_link_mismatch"] = pcie_link_mismatch
             gpus.append(_format_pcie_device(gpu_entry, device_index))
     except Exception:
         return {}
@@ -216,6 +224,106 @@ def _warn_nvml_unavailable() -> None:
         "Warning: NVML not available. GPU information will not be collected.",
         file=sys.stderr,
     )
+
+
+def _get_nvml_device_static_metadata(
+    pynvml_module: object,
+    handle: object,
+) -> dict[str, object]:
+    """Return best-effort per-GPU NVML static metadata."""
+    metadata: dict[str, object] = {}
+    nvml = cast(Any, pynvml_module)
+
+    try:
+        memory_info = nvml.nvmlDeviceGetMemoryInfo(handle)
+    except Exception:
+        pass
+    else:
+        total = _to_int(getattr(memory_info, "total", None))
+        if total is not None:
+            metadata["memory_total_bytes"] = total
+
+    try:
+        architecture = nvml.nvmlDeviceGetArchitecture(handle)
+    except Exception:
+        pass
+    else:
+        architecture_name = _nvml_architecture_to_name(architecture)
+        if architecture_name is not None:
+            metadata["architecture"] = architecture_name
+
+    try:
+        current_link_generation = nvml.nvmlDeviceGetCurrPcieLinkGeneration(handle)
+    except Exception:
+        pass
+    else:
+        generation = _to_int(current_link_generation)
+        if generation is not None and generation > 0:
+            metadata["nvml_link_generation"] = f"Gen{generation}"
+
+    try:
+        current_link_width = nvml.nvmlDeviceGetCurrPcieLinkWidth(handle)
+    except Exception:
+        pass
+    else:
+        width = _to_int(current_link_width)
+        if width is not None and width > 0:
+            metadata["nvml_lane_width"] = f"x{width}"
+
+    return metadata
+
+
+def _nvml_architecture_to_name(value: object) -> str | None:
+    """Return a stable NVIDIA architecture name for a pynvml architecture enum."""
+    architecture = _to_int(value)
+    if architecture is None:
+        return None
+    architecture_names = {
+        2: "Kepler",
+        3: "Maxwell",
+        4: "Pascal",
+        5: "Volta",
+        6: "Turing",
+        7: "Ampere",
+        8: "Ada Lovelace",
+        9: "Hopper",
+        10: "Blackwell",
+    }
+    return architecture_names.get(architecture, f"Unknown ({architecture})")
+
+
+def _compare_nvml_and_pcie_link_info(
+    nvml_metadata: Mapping[str, object],
+    pcie_device: Mapping[str, object] | None,
+) -> str | None:
+    """Return a mismatch note when NVML and OS PCIe link metadata disagree."""
+    if pcie_device is None:
+        return None
+
+    mismatches = []
+    nvml_generation = nvml_metadata.get("nvml_link_generation")
+    pcie_generation = _link_speed_to_generation(str(pcie_device.get("current_link_speed", "")))
+    if (
+        isinstance(nvml_generation, str)
+        and pcie_generation is not None
+        and nvml_generation != pcie_generation
+    ):
+        mismatches.append(
+            f"generation: NVML={nvml_generation} vs PCIe={pcie_generation}"
+        )
+
+    nvml_lane_width = nvml_metadata.get("nvml_lane_width")
+    pcie_current_width = pcie_device.get("current_link_width")
+    if isinstance(nvml_lane_width, str) and pcie_current_width is not None:
+        pcie_lane_width = f"x{str(pcie_current_width).lstrip('xX')}"
+        if nvml_lane_width.lower() != pcie_lane_width.lower():
+            mismatches.append(
+                f"width: NVML={nvml_lane_width} vs PCIe={pcie_lane_width}"
+            )
+
+    if not mismatches:
+        return None
+    return "; ".join(mismatches)
 
 
 def _find_matching_pcie_gpu(
@@ -1298,15 +1406,22 @@ def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, obj
         "current_link_width",
         "max_link_speed",
         "max_link_width",
+        "memory_total_bytes",
+        "architecture",
+        "pcie_link_mismatch",
     ):
         if device.get(key) is not None:
             formatted[key] = device[key]
 
-    if device.get("current_link_speed") is not None:
+    if device.get("nvml_link_generation") is not None:
+        formatted["link_generation"] = device["nvml_link_generation"]
+    elif device.get("current_link_speed") is not None:
         generation = _link_speed_to_generation(str(device["current_link_speed"]))
         if generation is not None:
             formatted["link_generation"] = generation
-    if device.get("current_link_width") is not None:
+    if device.get("nvml_lane_width") is not None:
+        formatted["lane_width"] = device["nvml_lane_width"]
+    elif device.get("current_link_width") is not None:
         formatted["lane_width"] = f"x{device['current_link_width']}"
     return formatted
 
