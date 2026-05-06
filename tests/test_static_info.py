@@ -313,7 +313,7 @@ def test_get_python_package_version_returns_none_when_not_installed(monkeypatch)
     assert _get_python_package_version("qbcompiler") is None
 
 
-def test_get_python_package_version_returns_none_on_import_runtime_failure(
+def test_get_python_package_version_falls_back_to_metadata_on_import_runtime_failure(
     monkeypatch,
 ) -> None:
     real_import = __import__
@@ -324,6 +324,32 @@ def test_get_python_package_version_returns_none_on_import_runtime_failure(
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(static_info, "__import__", fake_import, raising=False)
+    monkeypatch.setattr(
+        static_info.metadata,
+        "version",
+        lambda package_name: "2.3.4"
+        if package_name == "mobilint-qb-runtime"
+        else None,
+    )
+
+    assert _get_python_package_version("qbruntime") == "2.3.4"
+
+
+def test_get_python_package_version_returns_none_when_import_fails_and_metadata_missing(
+    monkeypatch,
+) -> None:
+    real_import = __import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "qbruntime":
+            raise OSError("missing native dependency")
+        return real_import(name, *args, **kwargs)
+
+    def fake_metadata_version(_package_name):
+        raise static_info.metadata.PackageNotFoundError
+
+    monkeypatch.setattr(static_info, "__import__", fake_import, raising=False)
+    monkeypatch.setattr(static_info.metadata, "version", fake_metadata_version)
 
     assert _get_python_package_version("qbruntime") is None
 

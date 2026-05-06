@@ -389,17 +389,20 @@ def _parse_nvcc_cuda_version(output: str) -> str | None:
 
 
 def _get_python_package_version(module_name: str) -> str | None:
-    """Return a best-effort package version by importing ``module_name``.
+    """Return a best-effort Python package version for ``module_name``.
 
     Some runtime packages expose ``__version__`` while others rely on installed
-    package metadata, so inspect both without adding hard dependencies.
+    package metadata, so inspect both without adding hard dependencies. Import
+    failures can happen even when a distribution is installed, for example when
+    native runtime dependencies are missing, so always fall back to metadata.
     """
+    version: object = None
     try:
         module = __import__(module_name)
     except Exception:
-        return None
-
-    version = getattr(module, "__version__", None)
+        pass
+    else:
+        version = getattr(module, "__version__", None)
     if isinstance(version, str) and version.strip():
         return version.strip()
 
