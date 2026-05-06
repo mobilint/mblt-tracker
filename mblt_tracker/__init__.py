@@ -4,7 +4,7 @@ This package provides classes for tracking power usage, utilization, and memory
 consumption across different hardware backends.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .device_tracker_cpu import CPUDeviceTracker
 from .device_tracker_gpu import GPUDeviceTracker
