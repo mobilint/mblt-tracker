@@ -298,7 +298,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
         status`` on a best-effort basis.
         """
         info = get_pcie_static_info(
-            vendor_id=os.environ.get("MBLT_TRACKER_NPU_PCI_VENDOR_ID", "1ed5"),
+            vendor_id=os.environ.get("MBLT_TRACKER_NPU_PCI_VENDOR_ID"),
             device_id=os.environ.get("MBLT_TRACKER_NPU_PCI_DEVICE_ID"),
             class_filter=os.environ.get("MBLT_TRACKER_NPU_PCI_CLASS_FILTER"),
         )

@@ -105,7 +105,7 @@ def test_npu_get_static_info_uses_mobilint_pci_vendor_by_default(monkeypatch) ->
 
     assert info == {"hardware": {"pcie": {"devices": []}}}
     assert captured == {
-        "vendor_id": "1ed5",
+        "vendor_id": None,
         "device_id": None,
         "class_filter": None,
     }

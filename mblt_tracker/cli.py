@@ -100,7 +100,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.command == "collect":
         sudo_password = None
-        if platform.system() == "Linux":
+        if platform.system() == "Linux" and sys.stdin.isatty():
             sudo_password = getpass.getpass("[sudo] password for dmidecode: ")
         info = collect_static_info(
             pcie_vendor_id=args.pcie_vendor_id,

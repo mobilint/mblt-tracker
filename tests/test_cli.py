@@ -5,6 +5,14 @@ import json
 from mblt_tracker import cli
 
 
+class FakeStdin:
+    def __init__(self, is_tty: bool) -> None:
+        self._is_tty = is_tty
+
+    def isatty(self) -> bool:
+        return self._is_tty
+
+
 def test_collect_prints_static_info_as_json(monkeypatch, capsys) -> None:
     def fake_collect_static_info(**kwargs):
         assert kwargs == {
@@ -18,6 +26,7 @@ def test_collect_prints_static_info_as_json(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr(cli, "collect_static_info", fake_collect_static_info)
     monkeypatch.setattr(cli.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(cli.sys, "stdin", FakeStdin(is_tty=True))
     monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt: "secret")
 
     exit_code = cli.main(["collect"])
@@ -41,6 +50,7 @@ def test_collect_writes_static_info_to_output_file(monkeypatch, tmp_path, capsys
 
     monkeypatch.setattr(cli, "collect_static_info", fake_collect_static_info)
     monkeypatch.setattr(cli.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(cli.sys, "stdin", FakeStdin(is_tty=True))
     monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt: "secret")
     output = tmp_path / "nested" / "static_info.json"
 
@@ -63,6 +73,33 @@ def test_collect_writes_static_info_to_output_file(monkeypatch, tmp_path, capsys
     assert capsys.readouterr().out == ""
     assert json.loads(output.read_text(encoding="utf-8")) == {
         "hardware": {"npus": [{"vendor_id": "0x1ed5"}]}
+    }
+
+
+def test_collect_skips_sudo_prompt_when_non_interactive(monkeypatch, capsys) -> None:
+    def fake_collect_static_info(**kwargs):
+        assert kwargs == {
+            "pcie_vendor_id": None,
+            "pcie_device_id": None,
+            "pcie_class_filter": None,
+            "all_pcie_devices": False,
+            "sudo_password": None,
+        }
+        return {"hardware": {"cpu": {"architecture": "x86_64"}}}
+
+    def fail_getpass(_prompt):
+        raise AssertionError("getpass should not be called for non-interactive stdin")
+
+    monkeypatch.setattr(cli, "collect_static_info", fake_collect_static_info)
+    monkeypatch.setattr(cli.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(cli.sys, "stdin", FakeStdin(is_tty=False))
+    monkeypatch.setattr(cli.getpass, "getpass", fail_getpass)
+
+    exit_code = cli.main(["collect"])
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "hardware": {"cpu": {"architecture": "x86_64"}}
     }
 
 
