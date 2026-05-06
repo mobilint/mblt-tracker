@@ -8,7 +8,7 @@
 </a>
 </p>
 <p>
-    <b>A lightweight Python library for tracking hardware metrics (Power, Utilization, Memory, Temperature) across CPU, GPU, and NPU.</b>
+    <b>A lightweight Python library and CLI for tracking dynamic hardware metrics and collecting static system metadata across CPU, GPU, and NPU.</b>
 </p>
 </div>
 <!-- markdownlint-enable MD033 -->
@@ -24,6 +24,9 @@
 - **Comprehensive Metrics**: Capture Power (Watts), Utilization (%), Memory Usage (MB/%), and Temperature (C).
 - **Statistical Summaries**: Automatically calculates averages, peaks (max), and p99 values.
 - **Time-Series Traces**: Export raw data for custom plotting and analysis.
+- **Static Metadata**: Collect best-effort host, OS, PCIe, driver, firmware, and device information for reproducible benchmarks.
+- **CLI Collection Tool**: Use `mblt-tracker collect` to export static host and PCIe information as JSON.
+- **PCIe Discovery**: Detect GPU/NPU-related PCIe devices on Linux and Windows, including link speed/width where available.
 - **Lightweight**: Minimal overhead, designed for production and research environments.
 
 ---
@@ -78,19 +81,176 @@ print(f"Average Power: {format_metric(metrics['avg_power_w'], 'W')}")
 print(f"Max Utilization: {format_metric(metrics['max_utilization_pct'], '%')}")
 print(f"Max Temperature: {format_metric(metrics['max_temperature_c'], 'C')}")
 
-# 5. Export time-series trace (list of (timestamp, power_w))
-trace = tracker.get_trace()
+# 5. Export time-series traces
+power_trace = tracker.get_trace()      # list of (timestamp, power_w)
+util_trace = tracker.get_util_trace()  # list of (timestamp, utilization_pct)
+temp_trace = tracker.get_temp_trace()  # list of (timestamp, temperature_c)
+
+# 6. Collect static metadata for reproducibility
+static_info = tracker.get_static_info()
 ```
 
 ---
 
-## 📊 Metrics Coverage
+## Command Line Interface
+
+`mblt-tracker` provides a CLI for collecting static host and PCIe metadata without writing Python code.
+
+```bash
+# Print collected information to stdout
+mblt-tracker collect
+
+# Save collected information as JSON
+mblt-tracker collect -o static-info.json
+
+# Include all PCIe devices instead of only GPU/NPU-related devices
+mblt-tracker collect --all-pcie-devices
+
+# Filter NPU PCIe discovery by vendor/device/class
+mblt-tracker collect --pcie-vendor-id 0x1ed5
+mblt-tracker collect --pcie-vendor-id 1ed5 --pcie-device-id 0100
+mblt-tracker collect --pcie-class-filter 0x12
+```
+
+The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and PCIe information. On Linux, PCIe information is read from sysfs. On Windows, PCI devices are collected through PowerShell/CIM/PnP queries.
+
+### Example Output
+
+#### Windows
+
+```powershell
+> mblt-tracker collect
+{
+  "hardware": {
+    "host": {
+      "cpu": {
+        "architecture": "AMD64",
+        "logical_cores": 20,
+        "model_name": "Intel64 Family 6 Model 191 Stepping 2, GenuineIntel",
+        "physical_cores": 14
+      },
+      "dram": {
+        "available_bytes": 14576525312,
+        "total_bytes": 34113015808
+      }
+    },
+    "pcie": {
+      "gpus": [
+        {
+          "bus_address": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
+          "dev_no": 0,
+          "device_id": "0x2204",
+          "manufacturer": "NVIDIA",
+          "name": "NVIDIA GeForce RTX 3090",
+          "pnp_device_id": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
+          "revision": "0xa1",
+          "status": "OK",
+          "subsystem_device_id": "0x1454",
+          "subsystem_vendor_id": "0x10de",
+          "vendor_id": "0x10de"
+        }
+      ],
+      "npus": [
+        {
+          "bus_address": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008",
+          "dev_no": 0,
+          "device_id": "0x0000",
+          "manufacturer": "MOBILINT, Inc.",
+          "name": "MOBILINT NPU Accelerator",
+          "pnp_device_id": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008",
+          "revision": "0x02",
+          "status": "OK",
+          "subsystem_device_id": "0x1093",
+          "subsystem_vendor_id": "0x0402",
+          "vendor_id": "0x209f"
+        }
+      ]
+    }
+  },
+  "inference": {
+    "os": {
+      "kernel_version": "11",
+      "name": "Windows",
+      "version": "10.0.26200"
+    }
+  }
+}
+```
+
+#### Linux
+
+```bash
+$ mblt-tracker collect
+{
+  "hardware": {
+    "host": {
+      "cpu": {
+        "architecture": "<architecture>",
+        "logical_cores": <logical_cores>,
+        "model_name": "<cpu_model_name>",
+        "physical_cores": <physical_cores>,
+        "vendor": "<cpu_vendor>"
+      },
+      "dram": {
+        "available_bytes": <available_bytes>,
+        "total_bytes": <total_bytes>
+      }
+    },
+    "pcie": {
+      "gpus": [
+        {
+          "bus_address": "<pci_bus_address>",
+          "dev_no": 0,
+          "device_id": "0x<device_id>",
+          "vendor_id": "0x<vendor_id>",
+          "current_link_speed": "<current_link_speed>",
+          "current_link_width": "<current_link_width>",
+          "max_link_speed": "<max_link_speed>",
+          "max_link_width": "<max_link_width>",
+          "link_generation": "<GenN>",
+          "lane_width": "x<width>"
+        }
+      ],
+      "npus": [
+        {
+          "bus_address": "<pci_bus_address>",
+          "dev_no": 0,
+          "device_id": "0x<device_id>",
+          "vendor_id": "0x<vendor_id>",
+          "current_link_speed": "<current_link_speed>",
+          "current_link_width": "<current_link_width>",
+          "max_link_speed": "<max_link_speed>",
+          "max_link_width": "<max_link_width>",
+          "link_generation": "<GenN>",
+          "lane_width": "x<width>"
+        }
+      ]
+    }
+  },
+  "inference": {
+    "cpu": {
+      "governor": "<cpu_governor>"
+    },
+    "os": {
+      "kernel_version": "<kernel_version>",
+      "name": "Linux",
+      "version": "<distribution_version>"
+    }
+  }
+}
+```
+
+---
+
+## Metrics Coverage
 
 | Metric | Intel CPU | NVIDIA GPU | Mobilint NPU |
 | :--- | :---: | :---: | :---: |
 | **Power (W)** | ✅ (RAPL) | ✅ (NVML) | ✅ (`mobilint-cli`) |
 | **Utilization (%)** | ✅ (`psutil`) | ✅ (NVML) | ✅ (`mobilint-cli`) |
 | **Memory (MB/%)** | ✅ (`psutil`) | ✅ (NVML) | ✅ (`mobilint-cli`) |
+| **Temperature (C)** | ✅ (`psutil`) | ✅ (NVML) | ✅ (`mobilint-cli`) |
+| **Static Info** | ✅ Host/OS/DRAM | ✅ NVML + PCIe | ✅ PCIe + `mobilint-cli` |
 | **Per-Device Stats** | ✅ (Sockets) | ✅ (GPU Indices) | ❌ (Global/Total) |
 
 ---
@@ -111,6 +271,7 @@ Uses **pyRAPL** for power measurements and **psutil** for utilization/memory.
 
 - **Features**: Tracks total system CPU usage or specific indices (e.g., `CPUDeviceTracker(cpu_id=[0, 1])`).
 - **Temperature**: Uses `psutil.sensors_temperatures()` when the platform exposes CPU thermal sensors.
+- **Static Info**: Reports CPU architecture, model, vendor, physical/logical cores, DRAM capacity, OS details, and Linux CPU governor when available.
 
 ### NVIDIA GPU
 
@@ -119,6 +280,7 @@ Uses **NVML** (via `nvidia-ml-py`) for high-fidelity hardware monitoring.
 - **Features**: Tracks total system GPU usage or specific indices (e.g., `GPUDeviceTracker(gpu_id=[0, 1])`).
 - **Dependencies**: Requires NVIDIA Drivers and NVML library installed.
 - **Temperature**: Reads on-die GPU temperature through NVML.
+- **Static Info**: Reports GPU count, selected device names, NVIDIA driver version, and CUDA driver version.
 
 ### Mobilint NPU
 
@@ -128,28 +290,85 @@ Polls the `mobilint-cli status` command.
 - **Requirement**: Ensure [Mobilint Utility Tool](https://docs.mobilint.com/v1.0/en/installing_utility.html) is installed and `mobilint-cli` is in your PATH.
 - **NPU Power**: Distinguishes between NPU-specific power and total system power.
 - **Temperature**: Parses NPU temperature from `mobilint-cli status` output when available.
+- **Static Info**: Reports Mobilint PCIe device information and parses driver, firmware, product, and board metadata from `mobilint-cli status` when available.
 
 ---
 
 ## 📝 Metric Output Format
 
-Calling `get_metric()` returns a dictionary with the following standard keys (where applicable):
+Calling `get_metric()` returns a dictionary with standardized cross-device keys where applicable. Missing or unavailable measurements are returned as `None`.
 
 ```json
 {
-  "avg_power_w": 25.4,          // Average total power in Watts
-  "max_power_w": 45.2,          // Peak power observed
-  "p99_power_w": 40.1,          // 99th percentile power
-  "avg_utilization_pct": 78.5,  // Average device utilization
-  "max_utilization_pct": 95.0,  // Peak device utilization
-  "avg_memory_used_mb": 2048.0, // Average memory usage
-  "total_memory_mb": 8192.0,    // Total available memory
-  "avg_temperature_c": 72.3,    // Average device temperature
-  "samples": 100                // Number of data points collected
+  "avg_power_w": 25.4,
+  "p99_power_w": 40.1,
+  "max_power_w": 45.2,
+  "avg_utilization_pct": 78.5,
+  "p99_utilization_pct": 90.0,
+  "max_utilization_pct": 95.0,
+  "avg_memory_used_mb": 2048.0,
+  "p99_memory_used_mb": 3072.0,
+  "max_memory_used_mb": 4096.0,
+  "total_memory_mb": 8192.0,
+  "avg_memory_used_pct": 25.0,
+  "p99_memory_used_pct": 37.5,
+  "max_memory_used_pct": 50.0,
+  "avg_temperature_c": 72.3,
+  "p99_temperature_c": 79.0,
+  "max_temperature_c": 80.0,
+  "samples": 100,
+  "util_samples": 101
 }
 ```
 
-*Note: Some trackers provide additional keys like `cpu` or `gpu` for per-socket/per-device breakdown.*
+Tracker-specific fields may also be present:
+
+- **CPU**: `cpu` contains per-socket statistics keyed by socket ID.
+- **GPU**: `gpu` contains per-GPU statistics keyed by GPU index. GPU-specific summary keys include `avg_gpu_util_pct`, `p99_gpu_util_pct`, `max_gpu_util_pct`, `avg_mem_util_pct`, and `p99_mem_util_pct`.
+- **NPU**: NPU-specific power keys include `avg_npu_power_w`, `p99_npu_power_w`, `max_npu_power_w`, `avg_total_power_w`, `p99_total_power_w`, and `max_total_power_w`. `avg_power_w` is mapped to total power for cross-device consistency.
+
+### Time-Series Trace APIs
+
+All trackers expose trace APIs for post-processing and plotting:
+
+```python
+tracker.get_trace()       # Power trace: list[(timestamp, power_w)]
+tracker.get_util_trace()  # Utilization trace: list[(timestamp, utilization_pct)]
+tracker.get_temp_trace()  # Temperature trace: list[(timestamp, temperature_c)]
+```
+
+---
+
+## 🔍 Static Information
+
+For benchmark reproducibility, each tracker exposes `get_static_info()`:
+
+```python
+from mblt_tracker import CPUDeviceTracker, GPUDeviceTracker, NPUDeviceTracker
+
+tracker = CPUDeviceTracker()
+info = tracker.get_static_info()
+```
+
+Static information is collected on a best-effort basis and may vary by platform and permissions.
+
+Typical fields include:
+
+- `hardware.host.cpu`: CPU architecture, model name, vendor, physical cores, logical cores
+- `hardware.host.dram`: total and available memory in bytes
+- `inference.os`: OS name, version, and kernel version
+- `inference.cpu.governor`: Linux CPU frequency governor, when available
+- `hardware.pcie.npus` / `hardware.pcie.gpus`: categorized PCIe accelerators, including vendor/device IDs and link information where available
+- `hardware.gpu`: GPU count and device names from NVML
+- `inference.gpu`: NVIDIA driver and CUDA driver versions
+- `hardware.npu`, `inference.driver`, `inference.firmware`: Mobilint metadata parsed from `mobilint-cli status`
+
+PCIe discovery supports:
+
+- **Linux**: `/sys/bus/pci/devices`
+- **Windows**: PowerShell/CIM/PnP PCI device queries
+
+For tests or custom environments, `MBLT_TRACKER_PCI_SYSFS` can override the Linux PCI sysfs root. NPU PCIe matching can be customized with `MBLT_TRACKER_NPU_PCI_VENDOR_ID`, `MBLT_TRACKER_NPU_PCI_DEVICE_ID`, and `MBLT_TRACKER_NPU_PCI_CLASS_FILTER`.
 
 ---
 
