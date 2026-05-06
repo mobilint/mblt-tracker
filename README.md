@@ -130,7 +130,7 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 13484097536,
+      "available_bytes": 14174498816,
       "dimms": [
         {
           "capacity_bytes": 17179869184,
@@ -160,6 +160,7 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
     },
     "gpus": [
       {
+        "architecture": "Ampere",
         "bus_address": "0000:03:00.0",
         "current_link_speed": "8.0 GT/s PCIe",
         "current_link_width": "4",
@@ -170,10 +171,11 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
         "driver_provider": "NVIDIA",
         "driver_version": "595.97",
         "lane_width": "x4",
-        "link_generation": "Gen3",
+        "link_generation": "Gen2",
         "manufacturer": "NVIDIA",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "16",
+        "memory_total_bytes": 25769803776,
         "name": "NVIDIA GeForce RTX 3090",
         "pnp_device_id": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
         "revision": "0xa1",
@@ -257,7 +259,7 @@ $ mblt-tracker collect
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 326469488640,
+      "available_bytes": 326259752960,
       "dimms": [
         {
           "capacity_bytes": 68719476736,
@@ -331,6 +333,7 @@ $ mblt-tracker collect
     },
     "gpus": [
       {
+        "architecture": "Blackwell",
         "bus_address": "0000:17:00.0",
         "class": "0x030000",
         "current_link_speed": "2.5 GT/s PCIe",
@@ -343,6 +346,7 @@ $ mblt-tracker collect
         "manufacturer": "NVIDIA Corporation",
         "max_link_speed": "32.0 GT/s PCIe",
         "max_link_width": "16",
+        "memory_total_bytes": 102641958912,
         "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
         "revision": "0xa1",
         "subsystem_device_id": "0x204b",
@@ -350,6 +354,7 @@ $ mblt-tracker collect
         "vendor_id": "0x10de"
       },
       {
+        "architecture": "Blackwell",
         "bus_address": "0000:e1:00.0",
         "class": "0x030000",
         "current_link_speed": "2.5 GT/s PCIe",
@@ -362,6 +367,7 @@ $ mblt-tracker collect
         "manufacturer": "NVIDIA Corporation",
         "max_link_speed": "32.0 GT/s PCIe",
         "max_link_width": "16",
+        "memory_total_bytes": 102641958912,
         "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
         "revision": "0xa1",
         "subsystem_device_id": "0x204b",

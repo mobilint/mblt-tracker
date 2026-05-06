@@ -108,7 +108,6 @@ PcieDeviceInfo = TypedDict(
         "lane_width": str,
         "memory_total_bytes": int,
         "architecture": str,
-        "pcie_link_mismatch": str,
     },
     total=False,
 )

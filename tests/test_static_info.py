@@ -142,8 +142,6 @@ def test_get_nvml_gpu_static_info_returns_metadata(monkeypatch) -> None:
                     "dev_no": 0,
                     "bus_address": "0000:17:00.0",
                     "class": "0x030000",
-                    "current_link_speed": "2.5 GT/s PCIe",
-                    "current_link_width": "16",
                     "device_id": "0x2bb1",
                     "driver_version": "580.95.05",
                     "architecture": "Ada Lovelace",
@@ -252,8 +250,6 @@ def test_get_nvml_gpu_static_info_matches_windows_pcie_by_nvidia_order(
         {
             "dev_no": 0,
             "bus_address": "0000:03:00.0",
-            "current_link_speed": "8.0 GT/s PCIe",
-            "current_link_width": "4",
             "device_id": "0x2204",
             "driver_description": "NVIDIA GeForce RTX 3090",
             "driver_version": "595.97",
@@ -266,75 +262,6 @@ def test_get_nvml_gpu_static_info_matches_windows_pcie_by_nvidia_order(
             "vendor_id": "0x10de",
         }
     ]
-
-
-def test_get_nvml_gpu_static_info_reports_pcie_link_mismatch(monkeypatch) -> None:
-    class FakePciInfo:
-        busId = b"00000000:17:00.0"
-
-    class FakeMemoryInfo:
-        total = 48 * 1024**3
-
-    class FakeNvml:
-        def nvmlInit(self) -> None:
-            return None
-
-        def nvmlShutdown(self) -> None:
-            return None
-
-        def nvmlDeviceGetCount(self) -> int:
-            return 1
-
-        def nvmlSystemGetDriverVersion(self) -> str:
-            return "580.95.05"
-
-        def nvmlSystemGetCudaDriverVersion(self) -> int:
-            return 12080
-
-        def nvmlDeviceGetHandleByIndex(self, index: int) -> str:
-            return f"handle-{index}"
-
-        def nvmlDeviceGetName(self, _handle: str) -> str:
-            return "NVIDIA RTX Test"
-
-        def nvmlDeviceGetPciInfo(self, _handle: str) -> FakePciInfo:
-            return FakePciInfo()
-
-        def nvmlDeviceGetMemoryInfo(self, _handle: str) -> FakeMemoryInfo:
-            return FakeMemoryInfo()
-
-        def nvmlDeviceGetArchitecture(self, _handle: str) -> int:
-            return 9
-
-        def nvmlDeviceGetCurrPcieLinkGeneration(self, _handle: str) -> int:
-            return 4
-
-        def nvmlDeviceGetCurrPcieLinkWidth(self, _handle: str) -> int:
-            return 8
-
-    monkeypatch.setitem(sys.modules, "pynvml", FakeNvml())
-
-    info = get_nvml_gpu_static_info(
-        pcie_devices=[
-            {
-                "bus_address": "0000:17:00.0",
-                "vendor_id": "0x10de",
-                "device_id": "0x2bb1",
-                "class": "0x030000",
-                "current_link_speed": "8.0 GT/s PCIe",
-                "current_link_width": "4",
-            }
-        ]
-    )
-
-    gpu = cast(list[dict[str, object]], info["hardware"]["gpus"])[0]
-    assert gpu["architecture"] == "Hopper"
-    assert gpu["memory_total_bytes"] == 48 * 1024**3
-    assert gpu["link_generation"] == "Gen4"
-    assert gpu["lane_width"] == "x8"
-    assert gpu["pcie_link_mismatch"] == (
-        "generation: NVML=Gen4 vs PCIe=Gen3; width: NVML=x8 vs PCIe=x4"
-    )
 
 
 def test_deep_merge_matches_gpu_by_bus_address_before_index() -> None:
