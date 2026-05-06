@@ -5,6 +5,7 @@ import os
 import platform
 import re
 import subprocess
+from importlib import metadata
 from pathlib import Path
 
 import psutil
@@ -73,7 +74,80 @@ def get_host_static_info() -> dict[str, object]:
         if power_policy:
             info["inference"]["cpu"] = power_policy
 
+    info["inference"]["cuda"] = {"version": _get_cuda_version() or "not_found"}
+    info["inference"]["qbruntime"] = {
+        "version": _get_python_package_version("qbruntime") or "not_installed"
+    }
+    info["inference"]["qbcompiler"] = {
+        "version": _get_python_package_version("qbcompiler") or "not_installed"
+    }
+
     return _remove_none_values(info)
+
+
+def _get_cuda_version() -> str | None:
+    """Return the CUDA version visible to this Python environment.
+
+    Prefer Python-level inspection via PyTorch when available. If PyTorch is not
+    installed or does not report CUDA, fall back to the local ``nvcc`` command.
+    """
+    torch_cuda_version = _get_torch_cuda_version()
+    if torch_cuda_version is not None:
+        return torch_cuda_version
+
+    nvcc_output = run_command(["nvcc", "--version"])
+    if nvcc_output is None:
+        return None
+    return _parse_nvcc_cuda_version(nvcc_output)
+
+
+def _get_torch_cuda_version() -> str | None:
+    try:
+        import torch
+    except ImportError:
+        return None
+
+    cuda_version = getattr(getattr(torch, "version", None), "cuda", None)
+    if not isinstance(cuda_version, str):
+        return None
+    cuda_version = cuda_version.strip()
+    return cuda_version or None
+
+
+def _parse_nvcc_cuda_version(output: str) -> str | None:
+    match = re.search(r"release\s+([0-9]+(?:\.[0-9]+)+)", output, re.IGNORECASE)
+    if match is not None:
+        return match.group(1)
+
+    match = re.search(r"V([0-9]+(?:\.[0-9]+)+)", output)
+    if match is not None:
+        return match.group(1)
+    return None
+
+
+def _get_python_package_version(module_name: str) -> str | None:
+    """Return a best-effort package version by importing ``module_name``.
+
+    Some runtime packages expose ``__version__`` while others rely on installed
+    package metadata, so inspect both without adding hard dependencies.
+    """
+    try:
+        module = __import__(module_name)
+    except ImportError:
+        return None
+
+    version = getattr(module, "__version__", None)
+    if isinstance(version, str) and version.strip():
+        return version.strip()
+
+    package_names = {
+        "qbruntime": "mobilint-qb-runtime",
+        "qbcompiler": "qbcompiler",
+    }
+    try:
+        return metadata.version(package_names.get(module_name, module_name))
+    except metadata.PackageNotFoundError:
+        return None
 
 
 def get_cpu_governor() -> str | None:

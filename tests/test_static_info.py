@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 
 import mblt_tracker.static_info as static_info
 from mblt_tracker.static_info import (
     _calculate_theoretical_bandwidth_gbps,
+    _get_cuda_version,
+    _get_python_package_version,
+    _parse_nvcc_cuda_version,
     _read_windows_pci_link_properties,
     _normalize_windows_power_plan_name,
     _parse_linux_dmidecode_memory,
@@ -20,6 +25,46 @@ from mblt_tracker.static_info import (
 
 def _write(path, value: str) -> None:
     path.write_text(value, encoding="utf-8")
+
+
+def test_parse_nvcc_cuda_version() -> None:
+    output = "Cuda compilation tools, release 12.4, V12.4.131\n"
+
+    assert _parse_nvcc_cuda_version(output) == "12.4"
+
+
+def test_get_cuda_version_prefers_torch_cuda(monkeypatch) -> None:
+    torch_module = types.SimpleNamespace(version=types.SimpleNamespace(cuda="12.1"))
+    monkeypatch.setitem(sys.modules, "torch", torch_module)
+    monkeypatch.setattr(static_info, "run_command", lambda _command: "release 11.8")
+
+    assert _get_cuda_version() == "12.1"
+
+
+def test_get_cuda_version_falls_back_to_nvcc(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "torch", None)
+    monkeypatch.setattr(
+        static_info,
+        "run_command",
+        lambda command: "Cuda compilation tools, release 12.4, V12.4.131\n"
+        if command == ["nvcc", "--version"]
+        else None,
+    )
+
+    assert _get_cuda_version() == "12.4"
+
+
+def test_get_python_package_version_reads_module_version(monkeypatch) -> None:
+    module = types.SimpleNamespace(__version__="1.2.3")
+    monkeypatch.setitem(sys.modules, "qbruntime", module)
+
+    assert _get_python_package_version("qbruntime") == "1.2.3"
+
+
+def test_get_python_package_version_returns_none_when_not_installed(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "qbcompiler", None)
+
+    assert _get_python_package_version("qbcompiler") is None
 
 
 def test_read_dram_dimms_windows_parses_cim_json(monkeypatch) -> None:
