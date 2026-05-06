@@ -13,7 +13,7 @@ def test_collect_prints_static_info_as_json(monkeypatch, capsys) -> None:
             "pcie_class_filter": None,
             "all_pcie_devices": False,
         }
-        return {"hardware": {"host": {"cpu": {"architecture": "x86_64"}}}}
+        return {"hardware": {"cpu": {"architecture": "x86_64"}}}
 
     monkeypatch.setattr(cli, "collect_static_info", fake_collect_static_info)
 
@@ -21,7 +21,7 @@ def test_collect_prints_static_info_as_json(monkeypatch, capsys) -> None:
 
     assert exit_code == 0
     assert json.loads(capsys.readouterr().out) == {
-        "hardware": {"host": {"cpu": {"architecture": "x86_64"}}}
+        "hardware": {"cpu": {"architecture": "x86_64"}}
     }
 
 
@@ -33,7 +33,7 @@ def test_collect_writes_static_info_to_output_file(monkeypatch, tmp_path, capsys
             "pcie_class_filter": "0x12",
             "all_pcie_devices": True,
         }
-        return {"hardware": {"pcie": {"npus": [{"vendor_id": "0x1ed5"}]}}}
+        return {"hardware": {"npus": [{"vendor_id": "0x1ed5"}]}}
 
     monkeypatch.setattr(cli, "collect_static_info", fake_collect_static_info)
     output = tmp_path / "nested" / "static_info.json"
@@ -56,7 +56,7 @@ def test_collect_writes_static_info_to_output_file(monkeypatch, tmp_path, capsys
     assert exit_code == 0
     assert capsys.readouterr().out == ""
     assert json.loads(output.read_text(encoding="utf-8")) == {
-        "hardware": {"pcie": {"npus": [{"vendor_id": "0x1ed5"}]}}
+        "hardware": {"npus": [{"vendor_id": "0x1ed5"}]}
     }
 
 
@@ -64,27 +64,32 @@ def test_collect_static_info_merges_windows_npu_driver_metadata(monkeypatch) -> 
     monkeypatch.setattr(
         cli,
         "get_host_static_info",
-        lambda: {"hardware": {"host": {"cpu": {"architecture": "AMD64"}}}},
+        lambda: {"hardware": {"cpu": {"architecture": "AMD64"}}},
     )
     monkeypatch.setattr(
         cli,
         "get_pcie_static_info",
         lambda **_kwargs: {
-            "hardware": {"pcie": {"npus": [{"vendor_id": "0x209f"}]}}
+            "hardware": {"npus": [{"vendor_id": "0x209f"}]}
         },
     )
     monkeypatch.setattr(
         cli,
         "get_windows_npu_driver_firmware_info",
-        lambda: {"inference": {"driver": {"version": "1.8.1.1348"}}},
+        lambda: {
+            "hardware": {
+                "npus": [
+                    {"vendor_id": "0x209f", "driver_version": "1.8.1.1348"}
+                ]
+            }
+        },
     )
 
     info = cli.collect_static_info()
 
     assert info == {
         "hardware": {
-            "host": {"cpu": {"architecture": "AMD64"}},
-            "pcie": {"npus": [{"vendor_id": "0x209f"}]},
+            "cpu": {"architecture": "AMD64"},
+            "npus": [{"vendor_id": "0x209f", "driver_version": "1.8.1.1348"}],
         },
-        "inference": {"driver": {"version": "1.8.1.1348"}},
     }

@@ -230,8 +230,8 @@ def test_get_pcie_static_info_reads_sysfs_and_selects_matching_device(
 
     info = get_pcie_static_info(vendor_id="1ed5", device_id="0100")
 
-    assert "devices" not in info["hardware"]["pcie"]
-    npus = info["hardware"]["pcie"]["npus"]
+    assert "pcie_devices" not in info["hardware"]
+    npus = info["hardware"]["npus"]
     assert len(npus) == 2
     assert npus[0]["dev_no"] == 0
     assert npus[0]["bus_address"] == "0000_01_00.0"
@@ -265,7 +265,7 @@ def test_get_pcie_static_info_can_include_all_devices(monkeypatch, tmp_path) -> 
 
     info = get_pcie_static_info(include_all_devices=True)
 
-    assert len(info["hardware"]["pcie"]["devices"]) == 2
+    assert len(info["hardware"]["pcie_devices"]) == 2
 
 
 def test_get_pcie_static_info_keeps_gpu_and_accelerator_devices(
@@ -293,14 +293,14 @@ def test_get_pcie_static_info_keeps_gpu_and_accelerator_devices(
 
     info = get_pcie_static_info(include_all_devices=True)
 
-    pcie = info["hardware"]["pcie"]
-    assert [device["bus_address"] for device in pcie["devices"]] == [
+    hardware = info["hardware"]
+    assert [device["bus_address"] for device in hardware["pcie_devices"]] == [
         "0000_01_00.0",
         "0000_02_00.0",
         "0000_03_00.0",
     ]
-    assert [device["bus_address"] for device in pcie["gpus"]] == ["0000_01_00.0"]
-    assert "npus" not in pcie
+    assert [device["bus_address"] for device in hardware["gpus"]] == ["0000_01_00.0"]
+    assert "npus" not in hardware
 
 
 def test_get_pcie_static_info_omits_raw_devices_by_default(
@@ -323,9 +323,9 @@ def test_get_pcie_static_info_omits_raw_devices_by_default(
 
     info = get_pcie_static_info()
 
-    pcie = info["hardware"]["pcie"]
-    assert "devices" not in pcie
-    assert [device["bus_address"] for device in pcie["gpus"]] == ["0000_01_00.0"]
+    hardware = info["hardware"]
+    assert "pcie_devices" not in hardware
+    assert [device["bus_address"] for device in hardware["gpus"]] == ["0000_01_00.0"]
 
 
 def test_parse_windows_active_power_scheme_english_output() -> None:
@@ -473,35 +473,30 @@ def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> 
         "get_pcie_static_info",
         lambda: {
             "hardware": {
-                "pcie": {
-                    "npus": [
-                        {
-                            "dev_no": 0,
-                            "vendor_id": "0x209f",
-                            "name": "MOBILINT NPU Accelerator",
-                            "pnp_device_id": "PCI\\VEN_209F&DEV_0000",
-                            "driver_version": "1.8.1.1348",
-                            "driver_provider": "MOBILINT, Inc.",
-                        }
-                    ]
-                }
+                "npus": [
+                    {
+                        "dev_no": 0,
+                        "vendor_id": "0x209f",
+                        "name": "MOBILINT NPU Accelerator",
+                        "pnp_device_id": "PCI\\VEN_209F&DEV_0000",
+                        "driver_version": "1.8.1.1348",
+                        "driver_provider": "MOBILINT, Inc.",
+                    }
+                ]
             }
         },
     )
 
     info = get_windows_npu_driver_firmware_info()
 
-    assert info["hardware"]["npu"] == {
-        "device_count": 1,
-        "devices": [
-            {
-                "device_index": 0,
-                "name": "MOBILINT NPU Accelerator",
-                "pnp_device_id": "PCI\\VEN_209F&DEV_0000",
-                "driver_version": "1.8.1.1348",
-                "driver_provider": "MOBILINT, Inc.",
-            }
-        ],
-    }
-    assert info["inference"]["driver"] == {"version": "1.8.1.1348"}
-    assert "firmware" not in info["inference"]
+    assert info["hardware"]["npus"] == [
+        {
+            "dev_no": 0,
+            "vendor_id": "0x209f",
+            "name": "MOBILINT NPU Accelerator",
+            "pnp_device_id": "PCI\\VEN_209F&DEV_0000",
+            "driver_version": "1.8.1.1348",
+            "driver_provider": "MOBILINT, Inc.",
+        }
+    ]
+    assert "inference" not in info

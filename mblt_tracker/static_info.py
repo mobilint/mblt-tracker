@@ -16,17 +16,15 @@ def get_host_static_info() -> dict[str, object]:
     virtual_memory = psutil.virtual_memory()
     info: dict[str, object] = {
         "hardware": {
-            "host": {
-                "cpu": {
-                    "architecture": platform.machine(),
-                    "physical_cores": psutil.cpu_count(logical=False),
-                    "logical_cores": psutil.cpu_count(logical=True),
-                },
-                "dram": {
-                    "total_bytes": virtual_memory.total,
-                    "available_bytes": virtual_memory.available,
-                },
-            }
+            "cpu": {
+                "architecture": platform.machine(),
+                "physical_cores": psutil.cpu_count(logical=False),
+                "logical_cores": psutil.cpu_count(logical=True),
+            },
+            "dram": {
+                "total_bytes": virtual_memory.total,
+                "available_bytes": virtual_memory.available,
+            },
         },
         "inference": {
             "os": {
@@ -44,9 +42,9 @@ def get_host_static_info() -> dict[str, object]:
     if model_name is None:
         model_name = platform.processor() or platform.uname().processor
     if model_name:
-        info["hardware"]["host"]["cpu"]["model_name"] = model_name
+        info["hardware"]["cpu"]["model_name"] = model_name
     if vendor:
-        info["hardware"]["host"]["cpu"]["vendor"] = vendor
+        info["hardware"]["cpu"]["vendor"] = vendor
 
     if platform.system() == "Windows":
         dimms = _read_dram_dimms_windows()
@@ -55,7 +53,7 @@ def get_host_static_info() -> dict[str, object]:
     else:
         dimms = []
     if dimms:
-        dram = info["hardware"]["host"]["dram"]
+        dram = info["hardware"]["dram"]
         dram["dimms"] = dimms
         theoretical_bandwidth_gbps = _calculate_theoretical_bandwidth_gbps(dimms)
         if theoretical_bandwidth_gbps is not None:
@@ -507,13 +505,14 @@ def get_pcie_static_info(
         vendor_id: Optional hexadecimal vendor id, with or without ``0x``.
         device_id: Optional hexadecimal device id, with or without ``0x``.
         class_filter: Optional PCI class prefix, e.g. ``0x12``.
-        include_all_devices: Include all PCIe devices in ``hardware.pcie.devices``.
+        include_all_devices: Include all PCIe devices in ``hardware.pcie_devices``.
             When false, omit the raw device list and expose only categorized
             GPU/NPU lists.
 
     Returns:
-        Nested dictionary containing categorized PCIe devices. Raw
-        ``hardware.pcie.devices`` is included only when requested.
+        Nested dictionary containing categorized PCIe devices under top-level
+        hardware keys. Raw ``hardware.pcie_devices`` is included only when
+        requested.
     """
     sysfs_override = os.environ.get("MBLT_TRACKER_PCI_SYSFS")
     if sysfs_override is not None:
@@ -522,20 +521,20 @@ def get_pcie_static_info(
         devices = _read_pcie_devices_windows()
     else:
         devices = _read_pcie_devices(Path("/sys/bus/pci/devices"))
-    pcie_info: dict[str, object] = {}
+    hardware_info: dict[str, object] = {}
     if include_all_devices:
-        pcie_info["devices"] = devices
+        hardware_info["pcie_devices"] = devices
     npus = _find_all_npu_devices(devices, vendor_id, device_id, class_filter)
     if npus:
-        pcie_info["npus"] = [
+        hardware_info["npus"] = [
             _format_pcie_device(device, dev_no) for dev_no, device in enumerate(npus)
         ]
     gpus = _find_all_gpu_devices(devices)
     if gpus:
-        pcie_info["gpus"] = [
+        hardware_info["gpus"] = [
             _format_pcie_device(device, dev_no) for dev_no, device in enumerate(gpus)
         ]
-    return {"hardware": {"pcie": pcie_info}} if pcie_info else {}
+    return {"hardware": hardware_info} if hardware_info else {}
 
 
 def _read_pcie_devices_windows() -> list[dict[str, object]]:
@@ -749,18 +748,12 @@ def get_windows_npu_driver_firmware_info(
         return {}
 
     pcie_info = get_pcie_static_info()
-    npus = (
-        pcie_info.get("hardware", {})
-        .get("pcie", {})
-        .get("npus", [])
-    )
+    npus = pcie_info.get("hardware", {}).get("npus", [])
     if not isinstance(npus, list):
         return {}
 
     normalized_vendor_ids = {_normalize_hex(vendor_id) for vendor_id in vendor_ids}
     devices = []
-    driver_versions = []
-    firmware_versions = []
     for npu in npus:
         if not isinstance(npu, dict):
             continue
@@ -768,46 +761,13 @@ def get_windows_npu_driver_firmware_info(
         if vendor_id not in normalized_vendor_ids:
             continue
 
-        device: dict[str, object] = {}
-        for source_key, target_key in (
-            ("dev_no", "device_index"),
-            ("name", "name"),
-            ("pnp_device_id", "pnp_device_id"),
-            ("driver_version", "driver_version"),
-            ("driver_date", "driver_date"),
-            ("driver_description", "driver_description"),
-            ("driver_provider", "driver_provider"),
-            ("firmware_version", "firmware_version"),
-            ("firmware_revision", "firmware_revision"),
-        ):
-            if npu.get(source_key) is not None:
-                device[target_key] = npu[source_key]
+        device = dict(npu)
         if device:
             devices.append(device)
 
-        driver_version = npu.get("driver_version")
-        if isinstance(driver_version, str) and driver_version:
-            driver_versions.append(driver_version)
-        firmware_version = npu.get("firmware_version") or npu.get("firmware_revision")
-        if isinstance(firmware_version, str) and firmware_version:
-            firmware_versions.append(firmware_version)
-
     info: dict[str, object] = {}
     if devices:
-        info.setdefault("hardware", {})["npu"] = {
-            "device_count": len(devices),
-            "devices": devices,
-        }
-    if driver_versions:
-        driver_info: dict[str, object] = {"version": driver_versions[0]}
-        if len(driver_versions) > 1:
-            driver_info["versions"] = driver_versions
-        info.setdefault("inference", {})["driver"] = driver_info
-    if firmware_versions:
-        firmware_info: dict[str, object] = {"version": firmware_versions[0]}
-        if len(firmware_versions) > 1:
-            firmware_info["versions"] = firmware_versions
-        info.setdefault("inference", {})["firmware"] = firmware_info
+        info.setdefault("hardware", {})["npus"] = devices
     return info
 
 

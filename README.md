@@ -122,88 +122,92 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
 > mblt-tracker collect
 {
   "hardware": {
-    "host": {
-      "cpu": {
-        "architecture": "AMD64",
-        "logical_cores": 20,
-        "model_name": "13th Gen Intel(R) Core(TM) i5-13500",
-        "physical_cores": 14,
-        "vendor": "GenuineIntel"
-      },
-      "dram": {
-        "available_bytes": 14081650688,
-        "dimms": [
-          {
-            "capacity_bytes": 17179869184,
-            "configured_speed_mhz": 5600,
-            "data_width_bits": 64,
-            "manufacturer": "Samsung",
-            "part_number": "M323R2GA3PB0-CWMOL",
-            "serial_number": "48A201A4",
-            "speed_mhz": 5600,
-            "total_width_bits": 64,
-            "type": "DDR5"
-          },
-          {
-            "capacity_bytes": 17179869184,
-            "configured_speed_mhz": 5600,
-            "data_width_bits": 64,
-            "manufacturer": "Samsung",
-            "part_number": "M323R2GA3PB0-CWMOL",
-            "serial_number": "48A201E5",
-            "speed_mhz": 5600,
-            "total_width_bits": 64,
-            "type": "DDR5"
-          }
-        ],
-        "theoretical_bandwidth_gbps": 89.6,
-        "total_bytes": 34113015808
-      }
+    "cpu": {
+      "architecture": "AMD64",
+      "logical_cores": 20,
+      "model_name": "13th Gen Intel(R) Core(TM) i5-13500",
+      "physical_cores": 14,
+      "vendor": "GenuineIntel"
     },
-    "pcie": {
-      "gpus": [
+    "dram": {
+      "available_bytes": 14499889152,
+      "dimms": [
         {
-          "bus_address": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
-          "current_link_speed": "8.0 GT/s PCIe",
-          "current_link_width": "4",
-          "dev_no": 0,
-          "device_id": "0x2204",
-          "lane_width": "x4",
-          "link_generation": "Gen3",
-          "manufacturer": "NVIDIA",
-          "max_link_speed": "16.0 GT/s PCIe",
-          "max_link_width": "16",
-          "name": "NVIDIA GeForce RTX 3090",
-          "pnp_device_id": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
-          "revision": "0xa1",
-          "status": "OK",
-          "subsystem_device_id": "0x1454",
-          "subsystem_vendor_id": "0x10de",
-          "vendor_id": "0x10de"
+          "capacity_bytes": 17179869184,
+          "configured_speed_mhz": 5600,
+          "data_width_bits": 64,
+          "manufacturer": "Samsung",
+          "part_number": "M323R2GA3PB0-CWMOL",
+          "serial_number": "48A201A4",
+          "speed_mhz": 5600,
+          "total_width_bits": 64,
+          "type": "DDR5"
+        },
+        {
+          "capacity_bytes": 17179869184,
+          "configured_speed_mhz": 5600,
+          "data_width_bits": 64,
+          "manufacturer": "Samsung",
+          "part_number": "M323R2GA3PB0-CWMOL",
+          "serial_number": "48A201E5",
+          "speed_mhz": 5600,
+          "total_width_bits": 64,
+          "type": "DDR5"
         }
       ],
-      "npus": [
-        {
-          "bus_address": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008",
-          "current_link_speed": "16.0 GT/s PCIe",
-          "current_link_width": "8",
-          "dev_no": 0,
-          "device_id": "0x0000",
-          "lane_width": "x8",
-          "link_generation": "Gen4",
-          "manufacturer": "MOBILINT, Inc.",
-          "max_link_speed": "16.0 GT/s PCIe",
-          "max_link_width": "8",
-          "name": "MOBILINT NPU Accelerator",
-          "pnp_device_id": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008",
-          "revision": "0x02",
-          "status": "OK",
-          "subsystem_device_id": "0x1093",
-          "subsystem_vendor_id": "0x0402",
-          "vendor_id": "0x209f"
-        }
-      ]
-    }
+      "theoretical_bandwidth_gbps": 89.6,
+      "total_bytes": 34113015808
+    },
+    "gpus": [
+      {
+        "bus_address": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
+        "current_link_speed": "8.0 GT/s PCIe",
+        "current_link_width": "4",
+        "dev_no": 0,
+        "device_id": "0x2204",
+        "driver_date": "/Date(1773705600000)/",
+        "driver_description": "NVIDIA GeForce RTX 3090",
+        "driver_provider": "NVIDIA",
+        "driver_version": "32.0.15.9597",
+        "lane_width": "x4",
+        "link_generation": "Gen3",
+        "manufacturer": "NVIDIA",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "16",
+        "name": "NVIDIA GeForce RTX 3090",
+        "pnp_device_id": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
+        "revision": "0xa1",
+        "status": "OK",
+        "subsystem_device_id": "0x1454",
+        "subsystem_vendor_id": "0x10de",
+        "vendor_id": "0x10de"
+      }
+    ],
+    "npus": [
+      {
+        "bus_address": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 0,
+        "device_id": "0x0000",
+        "driver_date": "/Date(1774828800000)/",
+        "driver_description": "MOBILINT NPU Accelerator",
+        "driver_provider": "MOBILINT, Inc.",
+        "driver_version": "1.8.1.1348",
+        "lane_width": "x8",
+        "link_generation": "Gen4",
+        "manufacturer": "MOBILINT, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "name": "MOBILINT NPU Accelerator",
+        "pnp_device_id": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008",
+        "revision": "0x02",
+        "status": "OK",
+        "subsystem_device_id": "0x1093",
+        "subsystem_vendor_id": "0x0402",
+        "vendor_id": "0x209f"
+      }
+    ]
   },
   "inference": {
     "cpu": {
@@ -211,10 +215,19 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
       "min_processor_state_pct": 100,
       "power_plan": "High performance"
     },
+    "cuda": {
+      "version": "not_found"
+    },
     "os": {
       "kernel_version": "11",
       "name": "Windows",
       "version": "10.0.26200"
+    },
+    "qbcompiler": {
+      "version": "not_installed"
+    },
+    "qbruntime": {
+      "version": "v1.2.0"
     }
   }
 }
