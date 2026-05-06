@@ -130,7 +130,7 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 14011174912,
+      "available_bytes": 13484097536,
       "dimms": [
         {
           "capacity_bytes": 17179869184,
@@ -164,18 +164,18 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
         "current_link_speed": "8.0 GT/s PCIe",
         "current_link_width": "4",
         "dev_no": 0,
-        "device_id": "0x1aef",
-        "driver_date": "/Date(1774051200000)/",
-        "driver_description": "High Definition Audio Controller",
-        "driver_provider": "Microsoft",
+        "device_id": "0x2204",
+        "driver_date": "/Date(1773705600000)/",
+        "driver_description": "NVIDIA GeForce RTX 3090",
+        "driver_provider": "NVIDIA",
         "driver_version": "595.97",
         "lane_width": "x4",
         "link_generation": "Gen3",
-        "manufacturer": "Microsoft",
+        "manufacturer": "NVIDIA",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "16",
         "name": "NVIDIA GeForce RTX 3090",
-        "pnp_device_id": "PCI\\VEN_10DE&DEV_1AEF&SUBSYS_145410DE&REV_A1\\4&126C804A&0&01E0",
+        "pnp_device_id": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
         "revision": "0xa1",
         "status": "OK",
         "subsystem_device_id": "0x1454",
@@ -257,7 +257,7 @@ $ mblt-tracker collect
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 326333992960,
+      "available_bytes": 326469488640,
       "dimms": [
         {
           "capacity_bytes": 68719476736,
