@@ -541,6 +541,7 @@ Memory Device
 
     assert commands == [
         (["dmidecode", "-t", "memory"], None, None),
+        (["sudo", "-n", "dmidecode", "-t", "memory"], None, None),
         (["sudo", "-S", "-p", "", "dmidecode", "-t", "memory"], "secret\n", 30),
     ]
     assert dimms[0]["manufacturer"] == "Samsung"
@@ -579,7 +580,46 @@ Memory Device
 
     assert commands == [
         (["dmidecode", "-t", "memory"], None, None),
+        (["sudo", "-n", "dmidecode", "-t", "memory"], None, None),
         (["sudo", "-S", "-p", "", "dmidecode", "-t", "memory"], "secret\n", 30),
+    ]
+    assert dimms[0]["manufacturer"] == "Samsung"
+
+
+def test_read_dram_dimms_linux_tries_non_interactive_sudo_before_password_provider(
+    monkeypatch,
+) -> None:
+    output = """
+Handle 0x0038, DMI type 17, 40 bytes
+Memory Device
+        Total Width: 64 bits
+        Data Width: 64 bits
+        Size: 16 GB
+        Type: DDR5
+        Speed: 5600 MT/s
+        Manufacturer: Samsung
+        Serial Number: 12345678
+        Part Number: M425R2GA3BB0-CWM
+        Configured Memory Speed: 5600 MT/s
+    """
+    commands = []
+
+    def fake_run_command(command):
+        commands.append(command)
+        if command == ["sudo", "-n", "dmidecode", "-t", "memory"]:
+            return output
+        return None
+
+    def fail_password_provider():
+        raise AssertionError("password provider should not be called")
+
+    monkeypatch.setattr(static_info, "run_command", fake_run_command)
+
+    dimms = _read_dram_dimms_linux(sudo_password_provider=fail_password_provider)
+
+    assert commands == [
+        ["dmidecode", "-t", "memory"],
+        ["sudo", "-n", "dmidecode", "-t", "memory"],
     ]
     assert dimms[0]["manufacturer"] == "Samsung"
 
@@ -1080,11 +1120,11 @@ Drivers - Aries: 1.8.1 Regulus: 1.12.0 |
     monkeypatch.setattr(static_info.platform, "system", lambda: "Linux")
     monkeypatch.setattr(static_info, "run_command", lambda _command: status_output)
 
-    info = get_linux_npu_driver_firmware_info(npu_devices=[{"dev_no": 0}])
+    info = get_linux_npu_driver_firmware_info(npu_devices=[{"dev_no": 1}])
 
     hardware = cast(dict[str, object], info["hardware"])
     assert hardware["npus"] == [
-        {"dev_no": 0, "board_name": "Board-A", "firmware": {"version": "2.0.1"}}
+        {"dev_no": 1, "board_name": "Board-B", "firmware": {"version": "2.0.2"}}
     ]
     assert info["inference"] == {
         "npu_driver_version": "1.8.1",

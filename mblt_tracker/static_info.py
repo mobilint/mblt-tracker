@@ -636,15 +636,15 @@ def _read_dram_dimms_linux(
     """Collect physical memory module information from Linux dmidecode.
 
     ``dmidecode`` normally requires root privileges. Try the direct command
-    first. When a sudo password is supplied, pass it to ``sudo -S`` so callers
-    can collect richer output without requiring users to run the whole CLI
-    through sudo. When a password provider is supplied, defer calling it until
-    after the unprivileged command fails so interactive collection does not
-    prompt unnecessarily. Without either, keep the best-effort non-interactive
-    sudo fallback for library callers. If all attempts fail, callers add a
+    first, then the best-effort non-interactive sudo fallback before asking for
+    any interactive password. When a sudo password is supplied, pass it to
+    ``sudo -S`` so callers can collect richer output without requiring users to
+    run the whole CLI through sudo. If all attempts fail, callers add a
     permission note to the public output.
     """
     output = run_command(["dmidecode", "-t", "memory"])
+    if output is None:
+        output = run_command(["sudo", "-n", "dmidecode", "-t", "memory"])
     if output is None:
         if sudo_password is None and sudo_password_provider is not None:
             sudo_password = sudo_password_provider()
@@ -654,8 +654,6 @@ def _read_dram_dimms_linux(
                 input_text=f"{sudo_password}\n",
                 timeout=30,
             )
-        else:
-            output = run_command(["sudo", "-n", "dmidecode", "-t", "memory"])
     if output is None:
         return []
     return _parse_linux_dmidecode_memory(output)
@@ -674,12 +672,12 @@ def get_linux_npu_driver_firmware_info(
         return {}
     info = parse_mobilint_status_static_info(status_output)
     if npu_devices is not None:
-        _limit_npu_metadata_to_filtered_devices(info, len(npu_devices))
+        _filter_npu_metadata_to_selected_devices(info, npu_devices)
     return info
 
 
-def _limit_npu_metadata_to_filtered_devices(
-    info: dict[str, object], npu_count: int
+def _filter_npu_metadata_to_selected_devices(
+    info: dict[str, object], selected_devices: list[dict[str, object]]
 ) -> None:
     hardware = info.get("hardware")
     if not isinstance(hardware, dict):
@@ -687,7 +685,30 @@ def _limit_npu_metadata_to_filtered_devices(
     npus = hardware.get("npus")
     if not isinstance(npus, list):
         return
-    hardware["npus"] = npus[:npu_count]
+    selected_npus = [
+        metadata
+        for selected_device in selected_devices
+        for metadata in npus
+        if isinstance(metadata, dict)
+        and _npu_metadata_matches_selected_device(metadata, selected_device)
+    ]
+    hardware["npus"] = selected_npus
+
+
+def _npu_metadata_matches_selected_device(
+    metadata: dict[str, object], selected_device: dict[str, object]
+) -> bool:
+    for key in ("dev_no", "bus_address", "pnp_device_id"):
+        metadata_value = metadata.get(key)
+        selected_value = selected_device.get(key)
+        if metadata_value is None or selected_value is None:
+            continue
+        if key == "dev_no":
+            if _to_int(metadata_value) == _to_int(selected_value):
+                return True
+        elif str(metadata_value).lower() == str(selected_value).lower():
+            return True
+    return False
 
 
 def parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
