@@ -392,17 +392,25 @@ class GPUDeviceTracker(BaseDeviceTracker):
     def get_static_info(self) -> dict[str, object]:
         """Return best-effort GPU static information collected via NVML."""
         info: dict[str, object] = {
-            "hardware.gpu.device_count": getattr(self, "num_gpus", None),
-            "inference.gpu.driver.version": getattr(self, "driver_version", None),
-            "inference.gpu.cuda_driver.version": getattr(self, "cuda_version", None),
+            "hardware": {
+                "gpu": {
+                    "device_count": getattr(self, "num_gpus", None),
+                }
+            },
+            "inference": {
+                "gpu": {
+                    "driver": {"version": getattr(self, "driver_version", None)},
+                    "cuda_driver": {"version": getattr(self, "cuda_version", None)},
+                }
+            },
         }
         device_name = getattr(self, "device_name", None)
         if device_name is not None:
-            info["hardware.gpu.devices"] = [
+            info["hardware"]["gpu"]["devices"] = [
                 {"device_index": gpu, "name": name}
                 for gpu, name in sorted(device_name.items())
             ]
-        return {key: value for key, value in info.items() if value is not None}
+        return info
 
     def get_util_trace(self) -> list[tuple[float, float]]:
         """Return a time-series trace of average GPU utilization.

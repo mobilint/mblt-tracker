@@ -10,7 +10,7 @@ from typing import Optional
 import numpy as np
 
 from .device_tracker import BaseDeviceTracker
-from .static_info import get_pcie_static_info, run_command
+from .static_info import _deep_merge, get_pcie_static_info, run_command
 
 
 class NPUDeviceTracker(BaseDeviceTracker):
@@ -298,7 +298,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
         )
         status_output = run_command(["mobilint-cli", "status"])
         if status_output:
-            info.update(_parse_mobilint_status_static_info(status_output))
+            _deep_merge(info, _parse_mobilint_status_static_info(status_output))
         return info
 
     def get_util_trace(self) -> list[tuple[float, float]]:
@@ -334,8 +334,10 @@ def _parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
     info: dict[str, object] = {}
     driver_match = re.search(r"Drivers\s*-\s*Aries:\s*([^\s]+)\s+Regulus:\s*([^\s|]+)", status_output)
     if driver_match is not None:
-        info["inference.driver.aries_version"] = driver_match.group(1)
-        info["inference.driver.regulus_version"] = driver_match.group(2)
+        info.setdefault("inference", {})["driver"] = {
+            "aries_version": driver_match.group(1),
+            "regulus_version": driver_match.group(2),
+        }
     device_matches = re.findall(
         r"\|\s*(\d+)\s+([A-Za-z0-9_-]+)\(([^)]+)\).*?\|", status_output
     )
@@ -351,14 +353,19 @@ def _parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
                     "board_name": board_name,
                 }
             )
-        info["hardware.npu.device_count"] = len(devices)
-        info["hardware.npu.devices"] = devices
+        npu_info = {
+            "device_count": len(devices),
+            "devices": devices,
+        }
         if len(set(products)) == 1:
-            info["hardware.npu.product"] = products[0]
+            npu_info["product"] = products[0]
+        info.setdefault("hardware", {})["npu"] = npu_info
     firmware_matches = re.findall(
         r"\|\s*\d+\s+[0-9]+(?:\.[0-9]+)?\s*C\s+([^\s|]+)", status_output
     )
     if firmware_matches:
-        info["inference.firmware.version"] = firmware_matches[0]
-        info["inference.firmware.versions"] = firmware_matches
+        info.setdefault("inference", {})["firmware"] = {
+            "version": firmware_matches[0],
+            "versions": firmware_matches,
+        }
     return info

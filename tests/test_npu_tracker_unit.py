@@ -71,15 +71,15 @@ EOF
 def test_parse_mobilint_status_static_info() -> None:
     info = _parse_mobilint_status_static_info(STATUS_OUTPUT)
 
-    assert info["inference.driver.aries_version"] == "1.12.0"
-    assert info["inference.driver.regulus_version"] == "N/A"
-    assert info["hardware.npu.device_count"] == 1
-    assert info["hardware.npu.product"] == "Aries"
-    assert info["hardware.npu.devices"] == [
+    assert info["inference"]["driver"]["aries_version"] == "1.12.0"
+    assert info["inference"]["driver"]["regulus_version"] == "N/A"
+    assert info["hardware"]["npu"]["device_count"] == 1
+    assert info["hardware"]["npu"]["product"] == "Aries"
+    assert info["hardware"]["npu"]["devices"] == [
         {"device_index": 0, "product": "Aries", "board_name": "aries0"}
     ]
-    assert info["inference.firmware.version"] == "1.2.4"
-    assert info["inference.firmware.versions"] == ["1.2.4"]
+    assert info["inference"]["firmware"]["version"] == "1.2.4"
+    assert info["inference"]["firmware"]["versions"] == ["1.2.4"]
 
 
 def test_npu_get_static_info_uses_mobilint_pci_vendor_by_default(monkeypatch) -> None:
@@ -90,7 +90,7 @@ def test_npu_get_static_info_uses_mobilint_pci_vendor_by_default(monkeypatch) ->
         captured["vendor_id"] = vendor_id
         captured["device_id"] = device_id
         captured["class_filter"] = class_filter
-        return {"hardware.pcie.devices": []}
+        return {"hardware": {"pcie": {"devices": []}}}
 
     monkeypatch.setattr(
         "mblt_tracker.device_tracker_npu.get_pcie_static_info",
@@ -103,7 +103,7 @@ def test_npu_get_static_info_uses_mobilint_pci_vendor_by_default(monkeypatch) ->
 
     info = tracker.get_static_info()
 
-    assert info == {"hardware.pcie.devices": []}
+    assert info == {"hardware": {"pcie": {"devices": []}}}
     assert captured == {
         "vendor_id": "1ed5",
         "device_id": None,

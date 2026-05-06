@@ -11,8 +11,9 @@ def test_collect_prints_static_info_as_json(monkeypatch, capsys) -> None:
             "pcie_vendor_id": None,
             "pcie_device_id": None,
             "pcie_class_filter": None,
+            "all_pcie_devices": False,
         }
-        return {"hardware.host.cpu.architecture": "x86_64"}
+        return {"hardware": {"host": {"cpu": {"architecture": "x86_64"}}}}
 
     monkeypatch.setattr(cli, "collect_static_info", fake_collect_static_info)
 
@@ -20,7 +21,7 @@ def test_collect_prints_static_info_as_json(monkeypatch, capsys) -> None:
 
     assert exit_code == 0
     assert json.loads(capsys.readouterr().out) == {
-        "hardware.host.cpu.architecture": "x86_64"
+        "hardware": {"host": {"cpu": {"architecture": "x86_64"}}}
     }
 
 
@@ -30,8 +31,9 @@ def test_collect_writes_static_info_to_output_file(monkeypatch, tmp_path, capsys
             "pcie_vendor_id": "1ed5",
             "pcie_device_id": "0100",
             "pcie_class_filter": "0x12",
+            "all_pcie_devices": True,
         }
-        return {"hardware.pcie.npu.vendor_id": "0x1ed5"}
+        return {"hardware": {"pcie": {"npus": [{"vendor_id": "0x1ed5"}]}}}
 
     monkeypatch.setattr(cli, "collect_static_info", fake_collect_static_info)
     output = tmp_path / "nested" / "static_info.json"
@@ -47,11 +49,12 @@ def test_collect_writes_static_info_to_output_file(monkeypatch, tmp_path, capsys
             "0100",
             "--pcie-class-filter",
             "0x12",
+            "--all-pcie-devices",
         ]
     )
 
     assert exit_code == 0
     assert capsys.readouterr().out == ""
     assert json.loads(output.read_text(encoding="utf-8")) == {
-        "hardware.pcie.npu.vendor_id": "0x1ed5"
+        "hardware": {"pcie": {"npus": [{"vendor_id": "0x1ed5"}]}}
     }

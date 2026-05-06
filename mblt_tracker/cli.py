@@ -6,22 +6,25 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence, TextIO
 
-from .static_info import get_host_static_info, get_pcie_static_info
+from .static_info import _deep_merge, get_host_static_info, get_pcie_static_info
 
 
 def collect_static_info(
     pcie_vendor_id: Optional[str] = None,
     pcie_device_id: Optional[str] = None,
     pcie_class_filter: Optional[str] = None,
+    all_pcie_devices: bool = False,
 ) -> dict[str, object]:
     """Collect best-effort static host and PCIe information."""
     info = get_host_static_info()
-    info.update(
+    _deep_merge(
+        info,
         get_pcie_static_info(
             vendor_id=pcie_vendor_id,
             device_id=pcie_device_id,
             class_filter=pcie_class_filter,
-        )
+            include_all_devices=all_pcie_devices,
+        ),
     )
     return info
 
@@ -55,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--pcie-class-filter",
         help="Optional PCIe class prefix filter, e.g. 0x12.",
     )
+    collect_parser.add_argument(
+        "--all-pcie-devices",
+        action="store_true",
+        help="Include all PCIe devices instead of only GPU/NPU-related devices.",
+    )
 
     return parser
 
@@ -77,6 +85,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             pcie_vendor_id=args.pcie_vendor_id,
             pcie_device_id=args.pcie_device_id,
             pcie_class_filter=args.pcie_class_filter,
+            all_pcie_devices=args.all_pcie_devices,
         )
         _write_json(info, args.output, sys.stdout)
         return 0
