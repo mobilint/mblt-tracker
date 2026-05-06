@@ -130,7 +130,7 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 14392823808,
+      "available_bytes": 15061708800,
       "dimms": [
         {
           "capacity_bytes": 17179869184,
@@ -165,6 +165,9 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
         "current_link_width": "4",
         "dev_no": 0,
         "device_id": "0x2204",
+        "driver_date": "/Date(1773705600000)/",
+        "driver_description": "NVIDIA GeForce RTX 3090",
+        "driver_provider": "NVIDIA",
         "driver_version": "32.0.15.9597",
         "lane_width": "x4",
         "link_generation": "Gen3",
@@ -190,10 +193,6 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
         "driver_date": "/Date(1774828800000)/",
         "driver_description": "MOBILINT NPU Accelerator",
         "driver_provider": "MOBILINT, Inc.",
-        "driver_version": "1.8.1.1348",
-        "firmware": {
-          "version": "2.0.3"
-        },
         "lane_width": "x8",
         "link_generation": "Gen4",
         "manufacturer": "MOBILINT, Inc.",
@@ -218,10 +217,6 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, and
     },
     "cuda": {
       "version": "not_found"
-    },
-    "driver": {
-      "aries_version": "1.12.0",
-      "regulus_version": "N/A"
     },
     "npu_driver_version": "1.8.1.1348",
     "os": {
