@@ -71,12 +71,11 @@ EOF
 def test_parse_mobilint_status_static_info() -> None:
     info = _parse_mobilint_status_static_info(STATUS_OUTPUT)
 
-    assert info["inference"]["driver"]["aries_version"] == "1.12.0"
-    assert info["inference"]["driver"]["regulus_version"] == "N/A"
+    assert info["inference"]["npu_driver_version"] == "1.12.0"
     assert info["hardware"]["npus"] == [
         {"dev_no": 0, "board_name": "aries0", "firmware": {"version": "1.2.4"}}
     ]
-    assert "firmware" not in info["inference"]
+    assert "driver" not in info["inference"]
 
 
 def test_npu_get_static_info_uses_mobilint_pci_vendor_by_default(monkeypatch) -> None:
@@ -124,7 +123,7 @@ def test_npu_get_static_info_uses_windows_pnp_metadata_without_mobilint_cli(
     )
     monkeypatch.setattr(
         "mblt_tracker.device_tracker_npu.get_windows_npu_driver_firmware_info",
-        lambda: {"inference": {"driver": {"version": "1.8.1.1348"}}},
+        lambda: {"inference": {"npu_driver_version": "1.8.1.1348"}},
     )
     monkeypatch.setattr(
         "mblt_tracker.device_tracker_npu.run_command",
@@ -135,6 +134,6 @@ def test_npu_get_static_info_uses_windows_pnp_metadata_without_mobilint_cli(
 
     assert info == {
         "hardware": {"npus": [{"vendor_id": "0x209f"}]},
-        "inference": {"driver": {"version": "1.8.1.1348"}},
+        "inference": {"npu_driver_version": "1.8.1.1348"},
     }
     assert commands == []

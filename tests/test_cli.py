@@ -83,11 +83,8 @@ def test_collect_static_info_merges_windows_npu_driver_metadata(monkeypatch) -> 
         cli,
         "get_windows_npu_driver_firmware_info",
         lambda: {
-            "hardware": {
-                "npus": [
-                    {"vendor_id": "0x209f", "driver_version": "1.8.1.1348"}
-                ]
-            }
+            "hardware": {"npus": [{"vendor_id": "0x209f"}]},
+            "inference": {"npu_driver_version": "1.8.1.1348"},
         },
     )
     monkeypatch.setattr(cli, "get_linux_npu_driver_firmware_info", lambda: {})
@@ -97,8 +94,9 @@ def test_collect_static_info_merges_windows_npu_driver_metadata(monkeypatch) -> 
     assert info == {
         "hardware": {
             "cpu": {"architecture": "AMD64"},
-            "npus": [{"vendor_id": "0x209f", "driver_version": "1.8.1.1348"}],
+            "npus": [{"vendor_id": "0x209f"}],
         },
+        "inference": {"npu_driver_version": "1.8.1.1348"},
     }
 
 
@@ -121,7 +119,7 @@ def test_collect_static_info_merges_linux_npu_driver_firmware_metadata(
         "get_linux_npu_driver_firmware_info",
         lambda: {
             "hardware": {"npus": [{"dev_no": 0, "firmware": {"version": "1.2.4"}}]},
-            "inference": {"driver": {"aries_version": "1.12.0"}},
+            "inference": {"npu_driver_version": "1.12.0"},
         },
     )
 
@@ -134,5 +132,5 @@ def test_collect_static_info_merges_linux_npu_driver_firmware_metadata(
                 {"vendor_id": "0x209f", "dev_no": 0, "firmware": {"version": "1.2.4"}}
             ],
         },
-        "inference": {"driver": {"aries_version": "1.12.0"}},
+        "inference": {"npu_driver_version": "1.12.0"},
     }

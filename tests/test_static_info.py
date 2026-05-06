@@ -345,8 +345,8 @@ def test_get_pcie_static_info_reads_linux_revision_driver_and_known_names(
     assert npu_info["name"] == "MOBILINT NPU Accelerator"
     assert npu_info["manufacturer"] == "MOBILINT, Inc."
     assert npu_info["revision"] == "0x02"
-    assert npu_info["driver_name"] == "mblt_npu"
-    assert npu_info["driver_version"] == "1.8.1"
+    assert "driver_version" not in npu_info
+    assert info["inference"]["npu_driver_version"] == "1.8.1"
 
 
 def test_lspci_metadata_parses_machine_readable_output(monkeypatch) -> None:
@@ -582,7 +582,7 @@ def test_get_cpu_power_policy_keeps_os_independent_shape(monkeypatch) -> None:
     }
 
 
-def test_read_windows_pci_link_properties_includes_driver_and_firmware_metadata(
+def test_read_windows_pci_link_properties_includes_driver_version_metadata(
     monkeypatch,
 ) -> None:
     instance_id = "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008"
@@ -590,11 +590,6 @@ def test_read_windows_pci_link_properties_includes_driver_and_firmware_metadata(
         {
             "InstanceId": instance_id,
             "DEVPKEY_Device_DriverVersion": "1.8.1.1348",
-            "DEVPKEY_Device_DriverDate": "/Date(1774828800000)/",
-            "DEVPKEY_Device_DriverDesc": "MOBILINT NPU Accelerator",
-            "DEVPKEY_Device_DriverProvider": "MOBILINT, Inc.",
-            "DEVPKEY_Device_FirmwareVersion": None,
-            "DEVPKEY_Device_FirmwareRevision": "2.0.3",
         }
     )
 
@@ -608,11 +603,6 @@ def test_read_windows_pci_link_properties_includes_driver_and_firmware_metadata(
 
     device = properties[instance_id]
     assert device["driver_version"] == "1.8.1.1348"
-    assert device["driver_date"] == "/Date(1774828800000)/"
-    assert device["driver_description"] == "MOBILINT NPU Accelerator"
-    assert device["driver_provider"] == "MOBILINT, Inc."
-    assert device["firmware_revision"] == "2.0.3"
-    assert "firmware_version" not in device
 
 
 def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> None:
@@ -628,11 +618,11 @@ def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> 
                         "vendor_id": "0x209f",
                         "name": "MOBILINT NPU Accelerator",
                         "pnp_device_id": "PCI\\VEN_209F&DEV_0000",
-                        "driver_version": "1.8.1.1348",
-                        "driver_provider": "MOBILINT, Inc.",
                     }
                 ]
             }
+            ,
+            "inference": {"npu_driver_version": "1.8.1.1348"},
         },
     )
 
@@ -644,8 +634,6 @@ def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> 
             "vendor_id": "0x209f",
             "name": "MOBILINT NPU Accelerator",
             "pnp_device_id": "PCI\\VEN_209F&DEV_0000",
-            "driver_version": "1.8.1.1348",
-            "driver_provider": "MOBILINT, Inc.",
         }
     ]
-    assert "inference" not in info
+    assert info["inference"] == {"npu_driver_version": "1.8.1.1348"}

@@ -51,11 +51,6 @@ class OsInfo(TypedDict):
     kernel_version: str
 
 
-class NpuDriverInfo(TypedDict):
-    aries_version: str | None
-    regulus_version: str | None
-
-
 class NpuFirmwareInfo(TypedDict):
     version: str | None
 
@@ -94,12 +89,6 @@ PcieDeviceInfo = TypedDict(
         "pnp_device_id": str,
         "revision": str,
         "driver_version": str,
-        "driver_name": str,
-        "driver_date": str,
-        "driver_description": str,
-        "driver_provider": str,
-        "firmware_version": str,
-        "firmware_revision": str,
         "current_link_speed": str,
         "current_link_width": str,
         "max_link_speed": str,
@@ -128,8 +117,8 @@ class HardwareInfo(TypedDict, total=False):
 class InferenceInfo(TypedDict, total=False):
     cpu: CpuPowerPolicy
     cuda: VersionInfo
-    driver: NpuDriverInfo
     gpu: GpuInferenceInfo
+    npu_driver_version: str
     os: OsInfo
     qbcompiler: VersionInfo
     qbruntime: VersionInfo
@@ -155,7 +144,6 @@ STATIC_INFO_CHILD_SCHEMAS: dict[type, dict[str, object]] = {
     InferenceInfo: {
         "cpu": CpuPowerPolicy,
         "cuda": VersionInfo,
-        "driver": NpuDriverInfo,
         "gpu": GpuInferenceInfo,
         "os": OsInfo,
         "qbcompiler": VersionInfo,

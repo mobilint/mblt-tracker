@@ -436,10 +436,7 @@ def parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
         status_output,
     )
     if driver_match is not None:
-        info.setdefault("inference", {})["driver"] = {
-            "aries_version": driver_match.group(1),
-            "regulus_version": driver_match.group(2),
-        }
+        info.setdefault("inference", {})["npu_driver_version"] = driver_match.group(1)
     device_matches = re.findall(
         r"\|\s*(\d+)\s+([A-Za-z0-9_-]+)\(([^)]+)\).*?\|", status_output
     )
@@ -631,16 +628,35 @@ def get_pcie_static_info(
     if include_all_devices:
         hardware_info["pcie_devices"] = devices
     npus = _find_all_npu_devices(devices, vendor_id, device_id, class_filter)
+    inference_info: dict[str, object] = {}
     if npus:
-        hardware_info["npus"] = [
+        formatted_npus = [
             _format_pcie_device(device, dev_no) for dev_no, device in enumerate(npus)
         ]
+        npu_driver_version = _pop_npu_driver_version(formatted_npus)
+        if npu_driver_version is not None:
+            inference_info["npu_driver_version"] = npu_driver_version
+        hardware_info["npus"] = formatted_npus
     gpus = _find_all_gpu_devices(devices)
     if gpus:
         hardware_info["gpus"] = [
             _format_pcie_device(device, dev_no) for dev_no, device in enumerate(gpus)
         ]
-    return {"hardware": hardware_info} if hardware_info else {}
+    info: dict[str, object] = {}
+    if hardware_info:
+        info["hardware"] = hardware_info
+    if inference_info:
+        info["inference"] = inference_info
+    return info
+
+
+def _pop_npu_driver_version(npus: list[dict[str, object]]) -> str | None:
+    npu_driver_version = None
+    for npu in npus:
+        driver_version = npu.pop("driver_version", None)
+        if npu_driver_version is None and isinstance(driver_version, str):
+            npu_driver_version = driver_version
+    return npu_driver_version
 
 
 def _read_pcie_devices_windows() -> list[dict[str, object]]:
@@ -743,12 +759,7 @@ def _read_windows_pci_link_properties(
             "'DEVPKEY_PciDevice_CurrentLinkWidth',"
             "'DEVPKEY_PciDevice_MaxLinkSpeed',"
             "'DEVPKEY_PciDevice_MaxLinkWidth',"
-            "'DEVPKEY_Device_DriverVersion',"
-            "'DEVPKEY_Device_DriverDate',"
-            "'DEVPKEY_Device_DriverDesc',"
-            "'DEVPKEY_Device_DriverProvider',"
-            "'DEVPKEY_Device_FirmwareVersion',"
-            "'DEVPKEY_Device_FirmwareRevision'"
+            "'DEVPKEY_Device_DriverVersion'"
             "); "
             f"{device_expression} | "
             "ForEach-Object { "
@@ -806,34 +817,9 @@ def _read_windows_pci_link_properties(
         driver_version = _clean_windows_device_property(
             entry.get("DEVPKEY_Device_DriverVersion")
         )
-        driver_date = _clean_windows_device_property(
-            entry.get("DEVPKEY_Device_DriverDate")
-        )
-        driver_description = _clean_windows_device_property(
-            entry.get("DEVPKEY_Device_DriverDesc")
-        )
-        driver_provider = _clean_windows_device_property(
-            entry.get("DEVPKEY_Device_DriverProvider")
-        )
-        firmware_version = _clean_windows_device_property(
-            entry.get("DEVPKEY_Device_FirmwareVersion")
-        )
-        firmware_revision = _clean_windows_device_property(
-            entry.get("DEVPKEY_Device_FirmwareRevision")
-        )
 
         if driver_version is not None:
             device_properties["driver_version"] = driver_version
-        if driver_date is not None:
-            device_properties["driver_date"] = driver_date
-        if driver_description is not None:
-            device_properties["driver_description"] = driver_description
-        if driver_provider is not None:
-            device_properties["driver_provider"] = driver_provider
-        if firmware_version is not None:
-            device_properties["firmware_version"] = firmware_version
-        if firmware_revision is not None:
-            device_properties["firmware_revision"] = firmware_revision
 
         if device_properties:
             properties[instance_id.upper()] = device_properties
@@ -843,12 +829,11 @@ def _read_windows_pci_link_properties(
 def get_windows_npu_driver_firmware_info(
     vendor_ids: tuple[str, ...] = ("1ed5", "209f"),
 ) -> dict[str, object]:
-    """Collect Windows NPU driver and firmware metadata from PnP properties.
+    """Collect Windows NPU driver metadata from PnP properties.
 
     This avoids calling ``mobilint-cli``. Driver metadata is exposed by Windows
-    through standard PnP device properties. Firmware metadata is best-effort:
-    it is returned only when the installed device driver publishes standard
-    firmware-related properties.
+    through standard PnP device properties and is normalized to
+    ``inference.npu_driver_version``.
     """
     if platform.system() != "Windows":
         return {}
@@ -872,8 +857,16 @@ def get_windows_npu_driver_firmware_info(
             devices.append(device)
 
     info: dict[str, object] = {}
+    pcie_inference = pcie_info.get("inference", {})
+    if isinstance(pcie_inference, dict):
+        npu_driver_version = pcie_inference.get("npu_driver_version")
+        if isinstance(npu_driver_version, str):
+            info.setdefault("inference", {})["npu_driver_version"] = npu_driver_version
     if devices:
         info.setdefault("hardware", {})["npus"] = devices
+        npu_driver_version = _pop_npu_driver_version(devices)
+        if npu_driver_version is not None:
+            info.setdefault("inference", {})["npu_driver_version"] = npu_driver_version
     return info
 
 
@@ -971,14 +964,12 @@ def _read_linux_pcie_driver_metadata(device_dir: Path) -> dict[str, object]:
     if not driver_path.exists():
         return metadata
     try:
-        driver_name = driver_path.resolve().name
+        driver_module_path = driver_path.resolve() / "module" / "version"
     except OSError:
-        driver_name = None
-    if driver_name:
-        metadata["driver_name"] = driver_name
-        version = _read_first_line(driver_path / "module" / "version")
-        if version is not None:
-            metadata["driver_version"] = version
+        return metadata
+    version = _read_first_line(driver_module_path)
+    if version is not None:
+        metadata["driver_version"] = version
     return metadata
 
 
@@ -1097,12 +1088,6 @@ def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, obj
         "pnp_device_id",
         "revision",
         "driver_version",
-        "driver_name",
-        "driver_date",
-        "driver_description",
-        "driver_provider",
-        "firmware_version",
-        "firmware_revision",
         "current_link_speed",
         "current_link_width",
         "max_link_speed",
