@@ -214,8 +214,8 @@ def _renumber_mla400_status_output(device_offset: int, power_offset: float) -> s
     )
 
 
-def _make_tracker() -> NPUDeviceTracker:
-    tracker = object.__new__(NPUDeviceTracker)
+def _make_tracker(tracker_cls: type[NPUDeviceTracker] = NPUDeviceTracker) -> NPUDeviceTracker:
+    tracker = object.__new__(tracker_cls)
     tracker._npu_power_glance = []
     tracker._ddr_power_glance = []
     tracker._pmic_power_glance = []
@@ -440,6 +440,35 @@ def test_npu_sampling_records_ddr_and_pmic_power_traces(monkeypatch) -> None:
     assert metrics["avg_pmic_power_w"] == 3.93
     assert metrics["ddr_power_samples"] == 1
     assert metrics["pmic_power_samples"] == 1
+
+
+def test_npu_sampling_honors_subclass_fetch_metrics_override(monkeypatch) -> None:
+    class CustomNPUDeviceTracker(NPUDeviceTracker):
+        def _fetch_metrics(self):
+            return (4.0, 10.0, 1.0, 2.0, 25.0, 512.0, 1024.0, 50.0, 42.0)
+
+    tracker = _make_tracker(CustomNPUDeviceTracker)
+    tracker._status_cmd = "mobilint-cli status -q"
+    tracker._npu_id = None
+    subprocess_calls = []
+    monkeypatch.setattr(
+        "mblt_tracker.device_tracker_npu.subprocess.run",
+        lambda *args, **kwargs: subprocess_calls.append(args) or None,
+    )
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.time.time", lambda: 321.0)
+
+    tracker._func_for_sched()
+
+    assert subprocess_calls == []
+    assert tracker.get_trace() == [(321.0, 10.0)]
+    assert tracker.get_npu_power_trace() == [(321.0, 4.0)]
+    assert tracker.get_ddr_power_trace() == [(321.0, 1.0)]
+    assert tracker.get_pmic_power_trace() == [(321.0, 2.0)]
+    metrics = tracker.get_metric()
+    assert metrics["avg_utilization_pct"] == 25.0
+    assert metrics["avg_memory_used_mb"] == 512.0
+    assert metrics["total_memory_mb"] == 1024.0
+    assert metrics["avg_temperature_c"] == 42.0
 
 
 def test_npu_sampling_keeps_existing_metrics_when_ddr_and_pmic_missing(

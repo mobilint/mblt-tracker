@@ -22,7 +22,6 @@ from .static_info import (
     run_command,
 )
 
-
 _DEFAULT_STATUS_CMD = "mobilint-cli status -q"
 _MLA400_SUBSYSTEM_VENDOR_ID = "0x402"
 _MLA400_SUBSYSTEM_DEVICE_ID = "0x108b"
@@ -140,9 +139,12 @@ class NPUDeviceTracker(BaseDeviceTracker):
         is detected by the GOLDFINGER power rail and represented as one card;
         MLA100 devices remain one card per device.
         """
-        override = self.__dict__.get("_fetch_metrics")
-        if callable(override):
-            metrics = override()
+        has_fetch_metrics_override = (
+            "_fetch_metrics" in self.__dict__
+            or type(self)._fetch_metrics is not NPUDeviceTracker._fetch_metrics
+        )
+        if has_fetch_metrics_override:
+            metrics = self._fetch_metrics()
             return (
                 _filter_metric_samples(
                     _metric_tuple_to_samples(metrics),
