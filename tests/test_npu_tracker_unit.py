@@ -176,6 +176,43 @@ Connected NPUs                : 4
         Sub Device ID         : 0x108B
 """
 
+MLA100_STATUS_QUERY_DEVICE_4 = """/dev/aries4
+    Product                   : Aries
+    Firmware
+        Version               : 1.1 (Rev: 0)
+    Temperature               : 39 C
+    Power
+        Total                 : 12.85 W
+        NPU                   : 3.90 W
+        DDR                   : 3.92 W
+        PMIC                  : 3.92 W
+    Memory
+        Usage                 : 0 MB
+        Total                 : 16384 MB
+    Utilization
+        Total                 : 0.00 %
+    PCI Express
+        Vendor ID             : 0x209F
+        Device ID             : 0x0
+        Sub Vendor ID         : 0x401
+        Sub Device ID         : 0x1093
+"""
+
+
+def _renumber_mla400_status_output(device_offset: int, power_offset: float) -> str:
+    output = MLA400_STATUS_QUERY_OUTPUT
+    for dev_no in range(3, -1, -1):
+        output = output.replace(f"/dev/aries{dev_no}", f"/dev/aries{dev_no + device_offset}")
+    return output.replace(
+        "Total                 : 51.55 W",
+        f"Total                 : {51.55 + power_offset:.2f} W",
+        1,
+    ).replace(
+        "GOLDFINGER            : 27.79 W",
+        f"GOLDFINGER            : {27.79 + power_offset:.2f} W",
+        1,
+    )
+
 
 def _make_tracker() -> NPUDeviceTracker:
     tracker = object.__new__(NPUDeviceTracker)
@@ -306,6 +343,47 @@ def test_parse_mobilint_status_query_metric_samples_groups_mla400() -> None:
     assert sample["goldfinger_power_w"] == pytest.approx(27.79)
     assert sample["npu_mem_used_mb"] == pytest.approx(51793.0)
     assert sample["npu_mem_total_mb"] == pytest.approx(65536.0)
+
+
+def test_parse_mobilint_status_query_metric_samples_keeps_mixed_mla100_separate() -> None:
+    status_output = MLA400_STATUS_QUERY_OUTPUT + MLA100_STATUS_QUERY_DEVICE_4
+    samples = _parse_mobilint_status_query_metric_samples(status_output)
+
+    assert samples is not None
+    assert len(samples) == 2
+    mla400_sample, mla100_sample = samples
+    assert mla400_sample["card_id"] == 0
+    assert mla400_sample["card_model"] == "MLA400"
+    assert mla400_sample["chip_count"] == 4
+    assert mla400_sample["total_power_w"] == pytest.approx(51.55)
+    assert mla400_sample["npu_power_w"] == pytest.approx(17.81)
+    assert mla100_sample["card_id"] == 1
+    assert mla100_sample["card_model"] == "MLA100"
+    assert mla100_sample["dev_no"] == 4
+    assert mla100_sample["total_power_w"] == pytest.approx(12.85)
+    assert mla100_sample["npu_power_w"] == pytest.approx(3.90)
+
+
+def test_parse_mobilint_status_query_metric_samples_groups_two_mla400_cards() -> None:
+    status_output = MLA400_STATUS_QUERY_OUTPUT + _renumber_mla400_status_output(
+        device_offset=4,
+        power_offset=10.0,
+    )
+    samples = _parse_mobilint_status_query_metric_samples(status_output)
+
+    assert samples is not None
+    assert len(samples) == 2
+    first_card, second_card = samples
+    assert first_card["card_id"] == 0
+    assert first_card["card_model"] == "MLA400"
+    assert first_card["chip_count"] == 4
+    assert first_card["total_power_w"] == pytest.approx(51.55)
+    assert first_card["goldfinger_power_w"] == pytest.approx(27.79)
+    assert second_card["card_id"] == 1
+    assert second_card["card_model"] == "MLA400"
+    assert second_card["chip_count"] == 4
+    assert second_card["total_power_w"] == pytest.approx(61.55)
+    assert second_card["goldfinger_power_w"] == pytest.approx(37.79)
 
 
 def test_npu_sampling_records_mla400_goldfinger_and_per_card_stats(monkeypatch) -> None:

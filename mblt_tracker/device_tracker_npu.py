@@ -566,13 +566,53 @@ def _parse_mobilint_status_query_metric_samples(
     if not device_samples:
         return None
 
-    if any(sample.get("goldfinger_power_w") is not None for sample in device_samples):
-        return [_aggregate_mla400_samples(device_samples)]
+    return _group_query_metric_samples(device_samples)
 
-    for card_id, sample in enumerate(device_samples):
-        sample["card_id"] = card_id
+
+def _group_query_metric_samples(samples: list[_MetricSample]) -> list[_MetricSample]:
+    grouped_samples: list[_MetricSample] = []
+    mla400_groups: dict[int, list[_MetricSample]] = {}
+
+    for sample in samples:
         sample["card_model"] = _classify_sample_card_model(sample)
-    return device_samples
+        if sample["card_model"] == "MLA400":
+            group_id = _mla400_group_id(sample, len(mla400_groups))
+            mla400_groups.setdefault(group_id, []).append(sample)
+        else:
+            grouped_samples.append(sample)
+
+    for _group_id, group_samples in sorted(mla400_groups.items()):
+        grouped_samples.append(_aggregate_mla400_samples(group_samples))
+
+    grouped_samples.sort(key=_sample_sort_key)
+    for card_id, sample in enumerate(grouped_samples):
+        sample["card_id"] = card_id
+    return grouped_samples
+
+
+def _mla400_group_id(sample: _MetricSample, fallback_group_id: int) -> int:
+    dev_no = _sample_int(sample, "dev_no")
+    if dev_no is None:
+        return fallback_group_id
+    return dev_no // 4
+
+
+def _sample_sort_key(sample: _MetricSample) -> tuple[int, int]:
+    devices = sample.get("devices")
+    if isinstance(devices, list):
+        dev_nos = [
+            _sample_int(device, "dev_no")
+            for device in devices
+            if isinstance(device, dict)
+        ]
+        dev_nos = [dev_no for dev_no in dev_nos if dev_no is not None]
+        if dev_nos:
+            return (min(dev_nos), 0)
+
+    dev_no = _sample_int(sample, "dev_no")
+    if dev_no is not None:
+        return (dev_no, 1)
+    return (10**9, 1)
 
 
 def _query_device_to_metric_sample(device: dict[str, object]) -> Optional[_MetricSample]:
