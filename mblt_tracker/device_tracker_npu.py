@@ -22,6 +22,9 @@ from .static_info import (
 )
 
 
+_DEFAULT_STATUS_CMD = "mobilint-cli status -q"
+
+
 class NPUDeviceTracker(BaseDeviceTracker):
     """Track NPU power and utilization by polling `mobilint-cli status`."""
 
@@ -39,11 +42,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
         super().__init__(interval=interval)
         if platform.system() != "Linux":
             raise RuntimeError("NPUDeviceTracker currently supports Linux only")
-        self._status_cmd = (
-            status_cmd
-            if status_cmd is not None
-            else "mobilint-cli status -q"
-        )
+        self._status_cmd = status_cmd if status_cmd is not None else _DEFAULT_STATUS_CMD
         self._job_id = "npu_device_track"
         self._npu_power_glance: list[float] = []
         self._ddr_power_glance: list[float] = []
@@ -90,76 +89,18 @@ class NPUDeviceTracker(BaseDeviceTracker):
                 npu_mem_total_mb, npu_mem_used_pct, npu_temp_c) if successful,
                 else None.
         """
-        try:
-            result = subprocess.run(
-                shlex.split(self._status_cmd),
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-        except Exception:
-            return None
-
-        if result.returncode != 0 or not result.stdout:
-            return None
-
-        output = result.stdout.strip()
-        metrics = _parse_mobilint_status_query_metrics(output)
+        output = _run_status_command(shlex.split(self._status_cmd))
+        metrics = _parse_mobilint_status_metrics(output) if output is not None else None
         if metrics is not None:
             return metrics
 
-        try:
-            payload = json.loads(output)
-        except Exception:
+        if self._status_cmd != _DEFAULT_STATUS_CMD:
             return None
 
-        if not payload.get("ok", False):
+        fallback_output = _run_status_command(_legacy_status_json_command())
+        if fallback_output is None:
             return None
-        if "npu_power_w" not in payload or "total_power_w" not in payload:
-            return None
-
-        npu_power_w = float(payload["npu_power_w"])
-        total_power_w = float(payload["total_power_w"])
-        ddr_power_w = _get_optional_payload_float(
-            payload,
-            "ddr_power_w",
-            "npu_ddr_power_w",
-            "ram_power_w",
-        )
-        pmic_power_w = _get_optional_payload_float(payload, "pmic_power_w")
-        npu_util_pct = payload.get("npu_util_pct")
-        if npu_util_pct is not None:
-            npu_util_pct = float(npu_util_pct)
-        npu_mem_used_mb = payload.get("npu_mem_used_mb")
-        if npu_mem_used_mb is not None:
-            npu_mem_used_mb = float(npu_mem_used_mb)
-        npu_mem_total_mb = payload.get("npu_mem_total_mb")
-        if npu_mem_total_mb is not None:
-            npu_mem_total_mb = float(npu_mem_total_mb)
-        npu_mem_used_pct = payload.get("npu_mem_used_pct")
-        if (
-            npu_mem_used_pct is None
-            and npu_mem_used_mb is not None
-            and npu_mem_total_mb is not None
-            and npu_mem_total_mb != 0.0
-        ):
-            npu_mem_used_pct = (npu_mem_used_mb / npu_mem_total_mb) * 100.0
-        elif npu_mem_used_pct is not None:
-            npu_mem_used_pct = float(npu_mem_used_pct)
-        npu_temp_c = payload.get("npu_temp_c")
-        if npu_temp_c is not None:
-            npu_temp_c = float(npu_temp_c)
-        return (
-            npu_power_w,
-            total_power_w,
-            ddr_power_w,
-            pmic_power_w,
-            npu_util_pct,
-            npu_mem_used_mb,
-            npu_mem_total_mb,
-            npu_mem_used_pct,
-            npu_temp_c,
-        )
+        return _parse_mobilint_status_metrics(fallback_output)
 
     def _func_for_sched(self) -> None:
         """Sample NPU metrics via the background scheduler."""
@@ -515,6 +456,89 @@ def _parse_mobilint_status_query_metrics(
         npu_mem_used_pct,
         npu_temp_c,
     )
+
+
+def _parse_mobilint_status_metrics(status_output: str):
+    metrics = _parse_mobilint_status_query_metrics(status_output)
+    if metrics is not None:
+        return metrics
+    return _parse_mobilint_status_json_metrics(status_output)
+
+
+def _parse_mobilint_status_json_metrics(status_output: str):
+    try:
+        payload = json.loads(status_output)
+    except Exception:
+        return None
+
+    if not isinstance(payload, dict) or not payload.get("ok", False):
+        return None
+    if "npu_power_w" not in payload or "total_power_w" not in payload:
+        return None
+
+    npu_power_w = float(payload["npu_power_w"])
+    total_power_w = float(payload["total_power_w"])
+    ddr_power_w = _get_optional_payload_float(
+        payload,
+        "ddr_power_w",
+        "npu_ddr_power_w",
+        "ram_power_w",
+    )
+    pmic_power_w = _get_optional_payload_float(payload, "pmic_power_w")
+    npu_util_pct = payload.get("npu_util_pct")
+    if npu_util_pct is not None:
+        npu_util_pct = float(npu_util_pct)
+    npu_mem_used_mb = payload.get("npu_mem_used_mb")
+    if npu_mem_used_mb is not None:
+        npu_mem_used_mb = float(npu_mem_used_mb)
+    npu_mem_total_mb = payload.get("npu_mem_total_mb")
+    if npu_mem_total_mb is not None:
+        npu_mem_total_mb = float(npu_mem_total_mb)
+    npu_mem_used_pct = payload.get("npu_mem_used_pct")
+    if (
+        npu_mem_used_pct is None
+        and npu_mem_used_mb is not None
+        and npu_mem_total_mb is not None
+        and npu_mem_total_mb != 0.0
+    ):
+        npu_mem_used_pct = (npu_mem_used_mb / npu_mem_total_mb) * 100.0
+    elif npu_mem_used_pct is not None:
+        npu_mem_used_pct = float(npu_mem_used_pct)
+    npu_temp_c = payload.get("npu_temp_c")
+    if npu_temp_c is not None:
+        npu_temp_c = float(npu_temp_c)
+    return (
+        npu_power_w,
+        total_power_w,
+        ddr_power_w,
+        pmic_power_w,
+        npu_util_pct,
+        npu_mem_used_mb,
+        npu_mem_total_mb,
+        npu_mem_used_pct,
+        npu_temp_c,
+    )
+
+
+def _run_status_command(command: list[str]) -> Optional[str]:
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return None
+
+    if result.returncode != 0 or not result.stdout:
+        return None
+    return result.stdout.strip()
+
+
+def _legacy_status_json_command() -> list[str]:
+    script_path = os.path.join(os.path.dirname(__file__), "device_tracker_npu.sh")
+    return ["bash", script_path, "--sample-once", "--json"]
 
 
 def _get_optional_payload_float(

@@ -267,6 +267,89 @@ def test_npu_fetch_metrics_reads_legacy_json_ddr_and_pmic_power(monkeypatch) -> 
     )
 
 
+def test_npu_fetch_metrics_falls_back_when_status_query_fails(monkeypatch) -> None:
+    tracker = _make_tracker()
+    tracker._status_cmd = "mobilint-cli status -q"
+    calls = []
+
+    class Result:
+        def __init__(self, returncode: int, stdout: str):
+            self.returncode = returncode
+            self.stdout = stdout
+
+    def fake_run(command, *args, **kwargs):
+        calls.append(command)
+        if command == ["mobilint-cli", "status", "-q"]:
+            return Result(returncode=2, stdout="")
+        assert command[-2:] == ["--sample-once", "--json"]
+        return Result(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "ok": True,
+                    "npu_power_w": 2.11,
+                    "total_power_w": 7.87,
+                    "npu_util_pct": 0.0,
+                    "npu_mem_used_mb": 0,
+                    "npu_mem_total_mb": 16384,
+                    "npu_temp_c": 49,
+                }
+            ),
+        )
+
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.subprocess.run", fake_run)
+
+    assert tracker._fetch_metrics() == (
+        2.11,
+        7.87,
+        None,
+        None,
+        0.0,
+        0.0,
+        16384.0,
+        0.0,
+        49.0,
+    )
+    assert calls[0] == ["mobilint-cli", "status", "-q"]
+    assert calls[1][-2:] == ["--sample-once", "--json"]
+
+
+def test_npu_fetch_metrics_falls_back_when_status_query_unparsable(
+    monkeypatch,
+) -> None:
+    tracker = _make_tracker()
+    tracker._status_cmd = "mobilint-cli status -q"
+
+    class Result:
+        def __init__(self, returncode: int, stdout: str):
+            self.returncode = returncode
+            self.stdout = stdout
+
+    def fake_run(command, *args, **kwargs):
+        if command == ["mobilint-cli", "status", "-q"]:
+            return Result(returncode=0, stdout="not a supported status output")
+        return Result(
+            returncode=0,
+            stdout=json.dumps(
+                {"ok": True, "npu_power_w": 3.9, "total_power_w": 12.85}
+            ),
+        )
+
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.subprocess.run", fake_run)
+
+    assert tracker._fetch_metrics() == (
+        3.9,
+        12.85,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+
+
 def test_npu_reset_clears_ddr_and_pmic_power_traces() -> None:
     tracker = _make_tracker()
     tracker._ddr_power_glance = [1.0]
