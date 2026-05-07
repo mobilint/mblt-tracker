@@ -7,28 +7,33 @@ saved to `gpu_metrics.json`.
 
 import json
 import pprint
-import sys
 import time
 
-import torch
-from torch import cuda, matmul
-from tqdm import tqdm
+import pytest
 
 from mblt_tracker import GPUDeviceTracker
 
-if __name__ == "__main__":
-    if not torch.cuda.is_available():
-        print(
-            "Skipping GPU test: CUDA is not available in the current PyTorch build "
-            "or no CUDA device is visible."
-        )
-        sys.exit(0)
+torch = pytest.importorskip("torch", reason="GPU integration test requires torch")
+tqdm_module = pytest.importorskip("tqdm", reason="GPU integration test requires tqdm")
 
+if not torch.cuda.is_available():
+    pytest.skip(
+        "Skipping GPU integration test: CUDA is not available in the current "
+        "PyTorch build or no CUDA device is visible.",
+        allow_module_level=True,
+    )
+
+cuda = torch.cuda
+matmul = torch.matmul
+tqdm = tqdm_module.tqdm
+
+if __name__ == "__main__":
     try:
         tracker = GPUDeviceTracker(interval=0.1)
     except Exception as exc:
-        print(f"Skipping GPU test: failed to initialize GPU tracker: {exc}")
-        sys.exit(0)
+        pytest.skip(
+            f"Skipping GPU integration test: failed to initialize GPU tracker: {exc}"
+        )
 
     x: torch.Tensor = torch.rand(10000, 10000).to("cuda")
     y: torch.Tensor = torch.rand(10000, 10000).to("cuda")

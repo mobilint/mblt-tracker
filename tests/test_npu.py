@@ -9,10 +9,27 @@ import pprint
 import time
 
 import numpy as np
-from mblt_model_zoo.vision import YOLO11m
-from tqdm import tqdm
+import pytest
 
 from mblt_tracker import NPUDeviceTracker
+
+try:
+    from qbruntime import Accelerator
+
+    Accelerator()
+except Exception as exc:
+    pytest.skip(
+        f"Skipping NPU integration test: NPU is not available: {exc}",
+        allow_module_level=True,
+    )
+
+vision = pytest.importorskip(
+    "mblt_model_zoo.vision", reason="NPU integration test requires mblt_model_zoo"
+)
+tqdm_module = pytest.importorskip("tqdm", reason="NPU integration test requires tqdm")
+
+YOLO11m = vision.YOLO11m
+tqdm = tqdm_module.tqdm
 
 if __name__ == "__main__":
     tracker = NPUDeviceTracker(interval=0.1)
