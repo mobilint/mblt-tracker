@@ -162,8 +162,6 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
       {
         "architecture": "Ampere",
         "bus_address": "0000:03:00.0",
-        "current_link_speed": "8.0 GT/s PCIe",
-        "current_link_width": "4",
         "dev_no": 0,
         "device_id": "0x2204",
         "driver_date": "/Date(1773705600000)/",
@@ -173,8 +171,6 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
         "lane_width": "x4",
         "link_generation": "Gen2",
         "manufacturer": "NVIDIA",
-        "max_link_speed": "16.0 GT/s PCIe",
-        "max_link_width": "16",
         "memory_total_bytes": 25769803776,
         "name": "NVIDIA GeForce RTX 3090",
         "pnp_device_id": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",

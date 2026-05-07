@@ -189,6 +189,80 @@ def test_collect_static_info_merges_linux_npu_driver_firmware_metadata(
     }
 
 
+def test_collect_static_info_removes_os_link_fields_for_nvml_gpu_match(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "get_host_static_info",
+        lambda sudo_password=None, sudo_password_provider=None: {"hardware": {}},
+    )
+    monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
+    monkeypatch.setattr(
+        cli,
+        "get_pcie_static_info",
+        lambda **_kwargs: {
+            "hardware": {
+                "gpus": [
+                    {
+                        "dev_no": 0,
+                        "bus_address": "0000:03:00.0",
+                        "vendor_id": "0x10de",
+                        "device_id": "0x2204",
+                        "current_link_speed": "8.0 GT/s PCIe",
+                        "current_link_width": "4",
+                        "max_link_speed": "16.0 GT/s PCIe",
+                        "max_link_width": "16",
+                        "link_generation": "Gen3",
+                        "lane_width": "x4",
+                    }
+                ]
+            }
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "get_nvml_gpu_static_info",
+        lambda pcie_devices: {
+            "hardware": {
+                "gpus": [
+                    {
+                        "dev_no": 0,
+                        "bus_address": "0000:03:00.0",
+                        "vendor_id": "0x10de",
+                        "device_id": "0x2204",
+                        "driver_version": "595.97",
+                        "link_generation": "Gen2",
+                        "lane_width": "x4",
+                        "name": "NVIDIA GeForce RTX 3090",
+                    }
+                ]
+            }
+        },
+    )
+    monkeypatch.setattr(cli, "get_windows_npu_driver_firmware_info", lambda **_kwargs: {})
+    monkeypatch.setattr(cli, "get_linux_npu_driver_firmware_info", lambda **_kwargs: {})
+
+    info = cli.collect_static_info()
+
+    assert info == {
+        "hardware": {
+            "gpus": [
+                {
+                    "dev_no": 0,
+                    "bus_address": "0000:03:00.0",
+                    "vendor_id": "0x10de",
+                    "device_id": "0x2204",
+                    "driver_version": "595.97",
+                    "link_generation": "Gen2",
+                    "lane_width": "x4",
+                    "name": "NVIDIA GeForce RTX 3090",
+                }
+            ]
+        }
+    }
+
+
 def test_collect_static_info_passes_pcie_filters_to_npu_metadata_helpers(
     monkeypatch,
 ) -> None:
