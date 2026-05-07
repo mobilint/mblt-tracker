@@ -9,9 +9,12 @@ import pprint
 import time
 
 import numpy as np
-from tqdm import tqdm
+import pytest
 
 from mblt_tracker import CPUDeviceTracker
+
+tqdm_module = pytest.importorskip("tqdm", reason="CPU integration test requires tqdm")
+tqdm = tqdm_module.tqdm
 
 if __name__ == "__main__":
     tracker = CPUDeviceTracker(interval=0.1)

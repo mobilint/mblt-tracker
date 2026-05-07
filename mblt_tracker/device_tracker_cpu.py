@@ -8,6 +8,7 @@ import psutil
 import pyRAPL
 
 from .device_tracker import BaseDeviceTracker
+from .static_info import get_host_static_info
 
 logging.getLogger().setLevel(logging.ERROR)
 
@@ -289,6 +290,10 @@ class CPUDeviceTracker(BaseDeviceTracker):
             list[tuple[float, float]]: List of (timestamp, total_power_w) pairs.
         """
         return list(self._power_trace)
+
+    def get_static_info(self) -> dict[str, object]:
+        """Return best-effort host CPU, DRAM, and OS static information."""
+        return get_host_static_info()
 
     def get_util_trace(self) -> list[tuple[float, float]]:
         """Return a time-series trace of total CPU utilization.

@@ -5,6 +5,7 @@ import numpy as np
 import pynvml
 
 from .device_tracker import BaseDeviceTracker
+from .static_info import _decode_nvml_string
 
 
 class GPUDeviceTracker(BaseDeviceTracker):
@@ -388,6 +389,35 @@ class GPUDeviceTracker(BaseDeviceTracker):
             list[tuple[float, float]]: List of (timestamp, total_power_w) pairs.
         """
         return list(self._power_trace)
+
+    def get_static_info(self) -> dict[str, object]:
+        """Return best-effort GPU static information collected via NVML."""
+        driver_version = getattr(self, "driver_version", None)
+        if driver_version is not None:
+            driver_version = _decode_nvml_string(driver_version)
+        info: dict[str, object] = {
+            "hardware": {
+                "gpu": {
+                    "device_count": getattr(self, "num_gpus", None),
+                }
+            },
+            "inference": {
+                "gpu": {
+                    "driver": {"version": driver_version},
+                    "cuda_driver": {"version": getattr(self, "cuda_version", None)},
+                }
+            },
+        }
+        device_name = getattr(self, "device_name", None)
+        if device_name is not None:
+            info["hardware"]["gpu"]["devices"] = [
+                {
+                    "device_index": gpu,
+                    "name": _decode_nvml_string(name),
+                }
+                for gpu, name in sorted(device_name.items())
+            ]
+        return info
 
     def get_util_trace(self) -> list[tuple[float, float]]:
         """Return a time-series trace of average GPU utilization.

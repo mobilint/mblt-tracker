@@ -80,5 +80,16 @@ class BaseDeviceTracker(ABC):
         """
 
     @abstractmethod
+    def get_static_info(self) -> dict:
+        """Return static device and host information.
+
+        Static information is collected as a best-effort snapshot and is intended
+        for benchmark reproducibility metadata, not for time-series monitoring.
+
+        Returns:
+            Dict: A dictionary keyed by stable variable-style names.
+        """
+
+    @abstractmethod
     def reset(self) -> None:
         """Clear all collected metrics and traces."""

@@ -1,6 +1,7 @@
 import json
 import os
 import platform
+import re
 import shlex
 import subprocess
 import time
@@ -9,6 +10,15 @@ from typing import Optional
 import numpy as np
 
 from .device_tracker import BaseDeviceTracker
+from .static_info import (
+    _deep_merge,
+    _filter_npu_metadata_to_selected_devices,
+    get_all_pcie_devices,
+    get_pcie_static_info,
+    get_windows_npu_driver_firmware_info,
+    parse_mobilint_status_static_info,
+    run_command,
+)
 
 
 class NPUDeviceTracker(BaseDeviceTracker):
@@ -282,6 +292,47 @@ class NPUDeviceTracker(BaseDeviceTracker):
         """
         return list(self._power_trace)
 
+    def get_static_info(self) -> dict[str, object]:
+        """Return best-effort NPU static information.
+
+        The PCIe section is collected from Linux sysfs when available. Firmware,
+        driver, product, and form-factor fields are parsed from ``mobilint-cli
+        status`` on a best-effort basis.
+        """
+        pcie_vendor_id = os.environ.get("MBLT_TRACKER_NPU_PCI_VENDOR_ID")
+        pcie_device_id = os.environ.get("MBLT_TRACKER_NPU_PCI_DEVICE_ID")
+        pcie_class_filter = os.environ.get("MBLT_TRACKER_NPU_PCI_CLASS_FILTER")
+        has_pcie_filter = any((pcie_vendor_id, pcie_device_id, pcie_class_filter))
+        pcie_devices = get_all_pcie_devices()
+        info = get_pcie_static_info(
+            vendor_id=pcie_vendor_id,
+            device_id=pcie_device_id,
+            class_filter=pcie_class_filter,
+            devices=pcie_devices,
+        )
+        hardware = info.get("hardware", {})
+        filtered_npus = []
+        if isinstance(hardware, dict) and isinstance(hardware.get("npus"), list):
+            filtered_npus = [npu for npu in hardware["npus"] if isinstance(npu, dict)]
+        if platform.system() == "Windows":
+            _deep_merge(
+                info,
+                get_windows_npu_driver_firmware_info(
+                    vendor_id=pcie_vendor_id,
+                    device_id=pcie_device_id,
+                    class_filter=pcie_class_filter,
+                    devices=pcie_devices,
+                ),
+            )
+        else:
+            status_output = run_command(["mobilint-cli", "status"])
+            if status_output:
+                status_info = _parse_mobilint_status_static_info(status_output)
+                if has_pcie_filter:
+                    _filter_npu_metadata_to_selected_devices(status_info, filtered_npus)
+                _deep_merge(info, status_info)
+        return info
+
     def get_util_trace(self) -> list[tuple[float, float]]:
         """Return a time-series trace of NPU utilization.
 
@@ -308,3 +359,8 @@ class NPUDeviceTracker(BaseDeviceTracker):
         self._mem_used_trace = []
         self._mem_used_pct_trace = []
         self._temp_trace = []
+
+
+def _parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
+    """Parse static NPU fields from ``mobilint-cli status`` table output."""
+    return parse_mobilint_status_static_info(status_output)

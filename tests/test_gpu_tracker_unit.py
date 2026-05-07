@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from mblt_tracker.device_tracker_gpu import GPUDeviceTracker
 
 
@@ -79,3 +81,36 @@ def test_get_metric_counts_samples_when_power_fails(monkeypatch) -> None:
     assert metrics["avg_power_w"] is None
     assert metrics["avg_gpu_util_pct"] == 88.0
     assert metrics["avg_memory_used_mb"] == 512.0
+
+
+def test_get_static_info_returns_nvml_metadata() -> None:
+    tracker = _make_tracker()
+    tracker.num_gpus = 1
+    tracker.driver_version = "555.42"
+    tracker.cuda_version = 12040
+    tracker.device_name = {0: "NVIDIA Test GPU"}
+
+    info = tracker.get_static_info()
+
+    assert info["hardware"]["gpu"]["device_count"] == 1
+    assert info["inference"]["gpu"]["driver"]["version"] == "555.42"
+    assert info["inference"]["gpu"]["cuda_driver"]["version"] == 12040
+    assert info["hardware"]["gpu"]["devices"] == [
+        {"device_index": 0, "name": "NVIDIA Test GPU"}
+    ]
+
+
+def test_get_static_info_decodes_nvml_bytes_for_json_serialization() -> None:
+    tracker = _make_tracker()
+    tracker.num_gpus = 1
+    tracker.driver_version = b"555.42"
+    tracker.cuda_version = 12040
+    tracker.device_name = {0: b"NVIDIA Test GPU"}
+
+    info = tracker.get_static_info()
+
+    assert info["inference"]["gpu"]["driver"]["version"] == "555.42"
+    assert info["hardware"]["gpu"]["devices"] == [
+        {"device_index": 0, "name": "NVIDIA Test GPU"}
+    ]
+    json.dumps(info)
