@@ -670,7 +670,9 @@ def get_linux_npu_driver_firmware_info(
         return {}
     if npu_devices is not None and not npu_devices:
         return {}
-    status_output = run_command(["mobilint-cli", "status"])
+    status_output = run_command(["mobilint-cli", "status", "-q"])
+    if not status_output:
+        status_output = run_command(["mobilint-cli", "status"])
     if not status_output:
         return {}
     info = parse_mobilint_status_static_info(status_output)
@@ -715,7 +717,16 @@ def _npu_metadata_matches_selected_device(
 
 
 def parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
-    """Parse static NPU fields from ``mobilint-cli status`` table output."""
+    """Parse static NPU fields from ``mobilint-cli status`` output.
+
+    Both the legacy table output and the code-friendly ``status -q`` output are
+    supported. The query output is parsed as an indentation-based dictionary
+    first because its shape is more stable than the human-readable table.
+    """
+    query_info = _parse_mobilint_status_query_static_info(status_output)
+    if query_info:
+        return query_info
+
     info: dict[str, object] = {}
     driver_match = re.search(
         r"Drivers\s*-\s*Aries:\s*([^\s]+)\s+Regulus:\s*([^\s|]+)",
@@ -749,6 +760,217 @@ def parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
         info["hardware"] = hardware
         hardware["npus"] = devices
     return info
+
+
+def parse_mobilint_status_query_output(status_output: str) -> dict[str, object]:
+    """Parse ``mobilint-cli status -q`` output into a nested dictionary.
+
+    The query format uses indentation to represent sections and ``Key : Value``
+    pairs for leaves. Device blocks are introduced by paths such as
+    ``/dev/aries0`` and are collected under the top-level ``devices`` list.
+    Values are intentionally kept as strings; consumers can convert units in a
+    context-aware way.
+    """
+    root: dict[str, object] = {}
+    stack: list[tuple[int, dict[str, object]]] = [(-1, root)]
+
+    for raw_line in status_output.splitlines():
+        if not raw_line.strip():
+            continue
+        line = raw_line.expandtabs(4).rstrip()
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip(" "))
+
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        parent = stack[-1][1] if stack else root
+
+        if stripped.startswith("/dev/") and ":" not in stripped:
+            devices = root.setdefault("devices", [])
+            if not isinstance(devices, list):
+                devices = []
+                root["devices"] = devices
+            device: dict[str, object] = {"path": stripped}
+            devices.append(device)
+            stack.append((indent, device))
+            continue
+
+        if ":" in stripped:
+            key, value = stripped.split(":", 1)
+            parent[key.strip()] = value.strip()
+            continue
+
+        section: dict[str, object] = {}
+        parent[stripped] = section
+        stack.append((indent, section))
+
+    return root
+
+
+def parse_mobilint_status_quiet_output(status_output: str) -> dict[str, object]:
+    """Deprecated alias for :func:`parse_mobilint_status_query_output`."""
+    return parse_mobilint_status_query_output(status_output)
+
+
+def _parse_mobilint_status_query_static_info(
+    status_output: str,
+) -> dict[str, object]:
+    parsed = parse_mobilint_status_query_output(status_output)
+    if not parsed.get("devices") and not any(
+        key.startswith("Driver Version") for key in parsed
+    ):
+        return {}
+
+    inference: dict[str, object] = {}
+    aries_version = _parse_mobilint_version_value(
+        _get_str(parsed.get("Driver Version (Aries)"))
+    )
+    regulus_version = _parse_mobilint_version_value(
+        _get_str(parsed.get("Driver Version (Regulus)"))
+    )
+    if aries_version is not None or regulus_version is not None:
+        inference["driver"] = {
+            "aries_version": aries_version,
+            "regulus_version": regulus_version,
+        }
+        if aries_version is not None:
+            inference["npu_driver_version"] = aries_version
+
+    devices = parsed.get("devices")
+    npus: list[dict[str, object]] = []
+    if isinstance(devices, list):
+        for index, raw_device in enumerate(devices):
+            if not isinstance(raw_device, dict):
+                continue
+            device = _mobilint_query_device_to_static_info(raw_device, index)
+            npus.append(device)
+
+    info: dict[str, object] = {}
+    if inference:
+        info["inference"] = inference
+    if npus:
+        info["hardware"] = {"npus": npus}
+    return info
+
+
+def _mobilint_query_device_to_static_info(
+    raw_device: dict[str, object], fallback_index: int
+) -> dict[str, object]:
+    path = _get_str(raw_device.get("path"))
+    dev_no = _parse_device_index(path) if path is not None else None
+    device: dict[str, object] = {
+        "dev_no": dev_no if dev_no is not None else fallback_index
+    }
+    if path is not None:
+        device["board_name"] = os.path.basename(path)
+
+    product = _get_str(raw_device.get("Product"))
+    if product is not None:
+        device["product"] = product
+
+    firmware = raw_device.get("Firmware")
+    if isinstance(firmware, dict):
+        firmware_info: dict[str, object] = {}
+        version_value = _get_str(firmware.get("Version"))
+        version = _parse_mobilint_version_value(version_value)
+        revision = _parse_mobilint_revision_value(version_value)
+        if version is not None:
+            firmware_info["version"] = version
+        if revision is not None:
+            firmware_info["revision"] = revision
+        if firmware_info:
+            device["firmware"] = firmware_info
+
+    pcie = raw_device.get("PCI Express")
+    if isinstance(pcie, dict):
+        mapping = {
+            "Vendor ID": "vendor_id",
+            "Device ID": "device_id",
+            "Sub Vendor ID": "subsystem_vendor_id",
+            "Sub Device ID": "subsystem_device_id",
+            "PCIe Generation": "link_generation",
+            "PCIe Lanes": "lane_width",
+            "PCIe Revision": "revision",
+            "PCIe Class Code": "class",
+        }
+        for source_key, target_key in mapping.items():
+            value = _get_str(pcie.get(source_key))
+            if value is not None:
+                device[target_key] = value
+
+    card_model = _classify_mobilint_query_card_model(raw_device, device)
+    if card_model is not None:
+        device["card_model"] = card_model
+        dev_no_value = _to_int(device.get("dev_no"))
+        device["card_id"] = (
+            _mla400_static_card_id(dev_no_value, fallback_index)
+            if card_model == "MLA400"
+            else device["dev_no"]
+        )
+
+    memory = raw_device.get("Memory")
+    if isinstance(memory, dict):
+        total_mb = _parse_number_from_unit_value(_get_str(memory.get("Total")))
+        if total_mb is not None:
+            device["memory_total_bytes"] = int(total_mb * 1024 * 1024)
+
+    return device
+
+
+def _mla400_static_card_id(dev_no: Optional[int], fallback_index: int) -> int:
+    """Return the logical MLA400 card id used by runtime metric grouping."""
+    if dev_no is None:
+        return fallback_index // 4
+    return dev_no // 4
+
+
+def _classify_mobilint_query_card_model(
+    raw_device: Mapping[str, object], device: Mapping[str, object]
+) -> Optional[str]:
+    power = raw_device.get("Power")
+    if isinstance(power, Mapping) and "GOLDFINGER" in power:
+        return "MLA400"
+    subsystem_vendor_id = _normalize_hex(str(device.get("subsystem_vendor_id", "")))
+    subsystem_device_id = _normalize_hex(str(device.get("subsystem_device_id", "")))
+    if subsystem_vendor_id in {"402", "0402"} and subsystem_device_id == "108b":
+        return "MLA400"
+    if subsystem_vendor_id in {"401", "0401"} and subsystem_device_id == "1093":
+        return "MLA100"
+    return None
+
+
+def _get_str(value: object) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _parse_mobilint_version_value(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    if value.upper() == "N/A":
+        return "N/A"
+    return value.split("(", 1)[0].strip() or None
+
+
+def _parse_mobilint_revision_value(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    match = re.search(r"Rev:\s*([^)\s]+)", value)
+    return match.group(1) if match is not None else None
+
+
+def _parse_device_index(path: str) -> Optional[int]:
+    match = re.search(r"(\d+)$", path)
+    return int(match.group(1)) if match is not None else None
+
+
+def _parse_number_from_unit_value(value: Optional[str]) -> Optional[float]:
+    if value is None:
+        return None
+    match = re.search(r"[-+]?\d+(?:\.\d+)?", value)
+    return float(match.group(0)) if match is not None else None
 
 
 def _parse_linux_dmidecode_memory(output: str) -> list[dict[str, object]]:

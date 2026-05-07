@@ -8,7 +8,7 @@
 </a>
 </p>
 <p>
-    <b>A lightweight Python library and CLI for tracking dynamic hardware metrics and collecting static system metadata across CPU, GPU, and NPU.</b>
+    <b>A lightweight Python library and CLI for tracking dynamic hardware metrics and collecting static system metadata across CPU, DRAM, GPU, and NPU.</b>
 </p>
 </div>
 <!-- markdownlint-enable MD033 -->
@@ -19,7 +19,7 @@
 
 ### ✨ Key Features
 
-- **Multi-Backend Support**: Unified interface for Intel CPU, NVIDIA GPU, and Mobilint NPU.
+- **Multi-Backend Support**: Unified interface for Intel CPU/DRAM, NVIDIA GPU, and Mobilint NPU.
 - **Background Tracking**: Uses a background scheduler to poll metrics without blocking your main execution.
 - **Comprehensive Metrics**: Capture Power (Watts), Utilization (%), Memory Usage (MB/%), and Temperature (C).
 - **Statistical Summaries**: Automatically calculates averages, peaks (max), and p99 values.
@@ -56,7 +56,7 @@ pip install -e .
 The typical workflow involves initializing a tracker, starting it before your target workload, and stopping it after.
 
 ```python
-from mblt_tracker import CPUDeviceTracker # or GPUDeviceTracker, NPUDeviceTracker
+from mblt_tracker import CPUDeviceTracker # or DRAMDeviceTracker, GPUDeviceTracker, NPUDeviceTracker
 
 # 1. Initialize with a polling interval (seconds)
 tracker = CPUDeviceTracker(interval=0.1)
@@ -116,7 +116,12 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
 
 ### Example Output
 
-#### Windows
+The following examples show representative `mblt-tracker collect` outputs from
+three host configurations: Windows with one MLA100-class Mobilint NPU and one
+NVIDIA GPU, Linux with one MLA100 card, and Linux with one MLA400 card exposed as
+four Aries devices.
+
+#### Windows: MLA100 + NVIDIA GPU
 
 ```powershell
 > mblt-tracker collect
@@ -130,7 +135,7 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 15478919168,
+      "available_bytes": 13193584640,
       "dimms": [
         {
           "capacity_bytes": 17179869184,
@@ -260,7 +265,7 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
 }
 ```
 
-#### Linux
+#### Linux: MLA100 + NVIDIA GPUs
 
 ```bash
 $ mblt-tracker collect
@@ -275,7 +280,7 @@ $ mblt-tracker collect
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 325414416384,
+      "available_bytes": 321980788736,
       "dimms": [
         {
           "capacity_bytes": 68719476736,
@@ -399,24 +404,29 @@ $ mblt-tracker collect
       {
         "board_name": "aries0",
         "bus_address": "0000:bd:00.0",
-        "class": "0x078000",
+        "card_id": 0,
+        "card_model": "MLA100",
+        "class": "0x7800002",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
         "dev_no": 0,
-        "device_id": "0x0000",
+        "device_id": "0x0",
         "firmware": {
-          "version": "fb9a5980"
+          "revision": "0",
+          "version": "1.1"
         },
-        "lane_width": "x8",
-        "link_generation": "Gen4",
+        "lane_width": "8",
+        "link_generation": "4",
         "manufacturer": "Mobilint, Inc.",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
         "name": "Aries",
+        "product": "Aries",
         "revision": "0x02",
         "subsystem_device_id": "0x1093",
-        "subsystem_vendor_id": "0x0401",
-        "vendor_id": "0x209f"
+        "subsystem_vendor_id": "0x401",
+        "vendor_id": "0x209F"
       }
     ]
   },
@@ -430,6 +440,10 @@ $ mblt-tracker collect
     "cuda": {
       "version": "12.8"
     },
+    "driver": {
+      "aries_version": "1.12.0",
+      "regulus_version": "N/A"
+    },
     "gpu": {
       "cuda_driver": {
         "version": "13.0"
@@ -438,6 +452,7 @@ $ mblt-tracker collect
         "version": "580.95.05"
       }
     },
+    "npu_driver_version": "1.12.0",
     "os": {
       "kernel_version": "6.8.0-110-generic",
       "name": "Linux",
@@ -453,18 +468,203 @@ $ mblt-tracker collect
 }
 ```
 
+#### Linux: MLA400 card (4 Aries devices)
+
+```bash
+$ mblt-tracker collect
+[sudo] password for dmidecode:
+Warning: NVML not available. GPU information will not be collected.
+{
+  "hardware": {
+    "cpu": {
+      "architecture": "x86_64",
+      "logical_cores": 16,
+      "model_name": "11th Gen Intel(R) Core(TM) i7-11700K @ 3.60GHz",
+      "physical_cores": 8,
+      "vendor": "GenuineIntel"
+    },
+    "dram": {
+      "available_bytes": 15836319744,
+      "dimms": [
+        {
+          "capacity_bytes": 34359738368,
+          "configured_speed_mhz": 3200,
+          "data_width_bits": 64,
+          "manufacturer": "Samsung",
+          "part_number": "M378A4G43AB2-CWE",
+          "serial_number": "331C9F38",
+          "speed_mhz": 3200,
+          "total_width_bits": 64,
+          "type": "DDR4"
+        },
+        {
+          "capacity_bytes": 34359738368,
+          "configured_speed_mhz": 3200,
+          "data_width_bits": 64,
+          "manufacturer": "Samsung",
+          "part_number": "M378A4G43AB2-CWE",
+          "serial_number": "331CA394",
+          "speed_mhz": 3200,
+          "total_width_bits": 64,
+          "type": "DDR4"
+        }
+      ],
+      "theoretical_bandwidth_gbps": 51.2,
+      "total_bytes": 67178881024
+    },
+    "npus": [
+      {
+        "board_name": "aries0",
+        "bus_address": "0000:03:00.0",
+        "card_id": 0,
+        "card_model": "MLA400",
+        "class": "0x7800002",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 0,
+        "device_id": "0x0",
+        "firmware": {
+          "revision": "0",
+          "version": "1.2.5"
+        },
+        "lane_width": "8",
+        "link_generation": "4",
+        "manufacturer": "Mobilint, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
+        "name": "Aries",
+        "product": "Aries",
+        "revision": "0x2",
+        "subsystem_device_id": "0x108B",
+        "subsystem_vendor_id": "0x402",
+        "vendor_id": "0x209F"
+      },
+      {
+        "board_name": "aries1",
+        "bus_address": "0000:04:00.0",
+        "card_id": 0,
+        "card_model": "MLA400",
+        "class": "0x7800002",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 1,
+        "device_id": "0x0",
+        "firmware": {
+          "revision": "0",
+          "version": "1.2.5"
+        },
+        "lane_width": "8",
+        "link_generation": "4",
+        "manufacturer": "Mobilint, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
+        "name": "Aries",
+        "product": "Aries",
+        "revision": "0x2",
+        "subsystem_device_id": "0x108B",
+        "subsystem_vendor_id": "0x402",
+        "vendor_id": "0x209F"
+      },
+      {
+        "board_name": "aries2",
+        "bus_address": "0000:05:00.0",
+        "card_id": 0,
+        "card_model": "MLA400",
+        "class": "0x7800002",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 2,
+        "device_id": "0x0",
+        "firmware": {
+          "revision": "0",
+          "version": "1.2.5"
+        },
+        "lane_width": "8",
+        "link_generation": "4",
+        "manufacturer": "Mobilint, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
+        "name": "Aries",
+        "product": "Aries",
+        "revision": "0x2",
+        "subsystem_device_id": "0x108B",
+        "subsystem_vendor_id": "0x402",
+        "vendor_id": "0x209F"
+      },
+      {
+        "board_name": "aries3",
+        "bus_address": "0000:06:00.0",
+        "card_id": 0,
+        "card_model": "MLA400",
+        "class": "0x7800002",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 3,
+        "device_id": "0x0",
+        "firmware": {
+          "revision": "0",
+          "version": "1.2.5"
+        },
+        "lane_width": "8",
+        "link_generation": "4",
+        "manufacturer": "Mobilint, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
+        "name": "Aries",
+        "product": "Aries",
+        "revision": "0x2",
+        "subsystem_device_id": "0x108B",
+        "subsystem_vendor_id": "0x402",
+        "vendor_id": "0x209F"
+      }
+    ]
+  },
+  "inference": {
+    "cpu": {
+      "governor": "powersave",
+      "max_processor_state_pct": null,
+      "min_processor_state_pct": null,
+      "power_plan": null
+    },
+    "cuda": {
+      "version": "12.8"
+    },
+    "driver": {
+      "aries_version": "1.12.0",
+      "regulus_version": "N/A"
+    },
+    "npu_driver_version": "1.12.0",
+    "os": {
+      "kernel_version": "6.17.0-20-generic",
+      "name": "Linux",
+      "version": "Ubuntu 24.04.2 LTS"
+    },
+    "qbcompiler": {
+      "version": "not_installed"
+    },
+    "qbruntime": {
+      "version": "v1.2.0"
+    }
+  }
+}
+```
+
 ---
 
 ## Metrics Coverage
 
-| Metric | Intel CPU | NVIDIA GPU | Mobilint NPU |
-| :--- | :---: | :---: | :---: |
-| **Power (W)** | ✅ (RAPL) | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Utilization (%)** | ✅ (`psutil`) | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Memory (MB/%)** | ✅ (`psutil`) | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Temperature (C)** | ✅ (`psutil`) | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Static Info** | ✅ Host/OS/DRAM | ✅ NVML + PCIe | ✅ PCIe + `mobilint-cli` |
-| **Per-Device Stats** | ✅ (Sockets) | ✅ (GPU Indices) | ❌ (Global/Total) |
+| Metric | Intel CPU | Host DRAM | NVIDIA GPU | Mobilint NPU |
+| :--- | :---: | :---: | :---: | :---: |
+| **Power (W)** | ✅ (RAPL) | ✅ (RAPL DRAM) | ✅ (NVML) | ✅ (`mobilint-cli`) |
+| **Utilization (%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
+| **Memory (MB/%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
+| **Temperature (C)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
+| **Static Info** | ✅ Host/OS/DRAM | ✅ Host/OS/DRAM | ✅ NVML + PCIe | ✅ PCIe + `mobilint-cli` |
+| **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (Logical NPU Cards) |
 
 ---
 
@@ -495,15 +695,29 @@ Uses **NVML** (via `nvidia-ml-py`) for high-fidelity hardware monitoring.
 - **Temperature**: Reads on-die GPU temperature through NVML.
 - **Static Info**: `GPUDeviceTracker.get_static_info()` reports the detected GPU count, tracked device names, NVIDIA driver version, and the raw NVML CUDA driver version. The `mblt-tracker collect` CLI provides richer NVML-discovered GPU metadata enriched with PCIe device/link information when available.
 
+### Host DRAM
+
+Uses the **Intel RAPL DRAM domain** through `pyRAPL` for host DRAM power measurements.
+
+- **Platform/Hardware**: Requires a host that exposes RAPL DRAM energy counters.
+- **Permission**: Requires read access to Intel RAPL sysfs, similar to CPU power tracking.
+- **Features**: Tracks all detected CPU socket DRAM domains by default, or specific socket IDs with `DRAMDeviceTracker(socket_id=0)` / `DRAMDeviceTracker(socket_id=[0, 1])`.
+- **Metrics**: Reports total host DRAM power through standard keys (`avg_power_w`, `p99_power_w`, `max_power_w`) and DRAM-specific aliases (`avg_dram_power_w`, `p99_dram_power_w`, `max_dram_power_w`). Per-socket statistics are returned under `metrics["dram"]`.
+- **Trace**: `DRAMDeviceTracker.get_trace()` returns total host DRAM power as `list[(timestamp, power_w)]`.
+- **Static Info**: `DRAMDeviceTracker.get_static_info()` returns the same best-effort host CPU, DRAM DIMM, and OS metadata as host static collection.
+
 ### Mobilint NPU
 
-Polls the `mobilint-cli status` command.
+Polls the `mobilint-cli status -q` command, with a legacy JSON fallback for older environments.
 
 - **Platform**: Currently supports **Linux only**.
 - **Requirement**: Ensure [Mobilint Utility Tool](https://docs.mobilint.com/v1.0/en/installing_utility.html) is installed and `mobilint-cli` is in your PATH.
-- **NPU Power**: Distinguishes between NPU-specific power and total system power.
+- **Device Selection**: Tracks all logical NPU cards by default, or selected logical card IDs with `NPUDeviceTracker(npu_id=0)` / `NPUDeviceTracker(npu_id=[0, 1])`.
+- **MLA100 vs MLA400**: `status -q` output is classified best-effort. Devices with a `Power.GOLDFINGER` rail are treated as MLA400 and grouped as one logical card. MLA100 devices remain one logical card per PCIe card. PCIe subsystem IDs are also used as a fallback (`0x401/0x1093` for MLA100, `0x402/0x108B` for MLA400 observed outputs).
+- **NPU Power**: Distinguishes between NPU core power and total card/system power. For MLA400, `Power.Total` is reported by the first chip, while NPU core, memory, and utilization are aggregated across the grouped Aries chips.
+- **DDR/PMIC/GOLDFINGER Power**: Parses optional NPU board DDR, PMIC, and MLA400 GOLDFINGER power rails when present.
 - **Temperature**: Parses NPU temperature from `mobilint-cli status` output when available.
-- **Static Info**: Reports Mobilint PCIe device information and parses driver, firmware, product, and board metadata from `mobilint-cli status` when available.
+- **Static Info**: Reports Mobilint PCIe device information and parses driver, firmware, product, board, `card_model`, and `card_id` metadata from `mobilint-cli status` when available.
 
 ---
 
@@ -538,7 +752,8 @@ Tracker-specific fields may also be present:
 
 - **CPU**: `cpu` contains per-socket statistics keyed by socket ID.
 - **GPU**: `gpu` contains per-GPU statistics keyed by GPU index. GPU-specific summary keys include `avg_gpu_util_pct`, `p99_gpu_util_pct`, `max_gpu_util_pct`, `avg_mem_util_pct`, and `p99_mem_util_pct`.
-- **NPU**: NPU-specific power keys include `avg_npu_power_w`, `p99_npu_power_w`, `max_npu_power_w`, `avg_total_power_w`, `p99_total_power_w`, and `max_total_power_w`. `avg_power_w` is mapped to total power for cross-device consistency.
+- **DRAM**: DRAM-specific power keys include `avg_dram_power_w`, `p99_dram_power_w`, and `max_dram_power_w`. `dram` contains per-socket statistics keyed by socket ID.
+- **NPU**: NPU-specific power keys include `avg_npu_power_w`, `p99_npu_power_w`, `max_npu_power_w`, `avg_ddr_power_w`, `p99_ddr_power_w`, `max_ddr_power_w`, `avg_pmic_power_w`, `p99_pmic_power_w`, `max_pmic_power_w`, `avg_goldfinger_power_w`, `p99_goldfinger_power_w`, `max_goldfinger_power_w`, `avg_total_power_w`, `p99_total_power_w`, and `max_total_power_w`. `avg_power_w` is mapped to total power for cross-device consistency. `npu` contains per logical card statistics keyed by card ID.
 
 ### Time-Series Trace APIs
 
@@ -548,6 +763,15 @@ All trackers expose trace APIs for post-processing and plotting:
 tracker.get_trace()       # Power trace: list[(timestamp, power_w)]
 tracker.get_util_trace()  # Utilization trace: list[(timestamp, utilization_pct)]
 tracker.get_temp_trace()  # Temperature trace: list[(timestamp, temperature_c)]
+```
+
+NPU trackers additionally expose rail-specific power traces:
+
+```python
+tracker.get_npu_power_trace()         # NPU core power
+tracker.get_ddr_power_trace()         # On-board NPU DDR power, when available
+tracker.get_pmic_power_trace()        # NPU PMIC power, when available
+tracker.get_goldfinger_power_trace()  # MLA400 GOLDFINGER input power, when available
 ```
 
 ---
@@ -575,6 +799,8 @@ Typical fields include:
 - `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names
 - `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices enriched with PCIe vendor/device IDs and link information where available
 - `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, link information, and firmware metadata where available
+- `hardware.npus[].card_model`: best-effort Mobilint card model classification such as `MLA100` or `MLA400` when `mobilint-cli status -q` exposes enough information
+- `hardware.npus[].card_id`: logical NPU card ID used by `NPUDeviceTracker(npu_id=...)`; MLA400 Aries chips share the same card ID
 - `inference.gpu`: NVIDIA driver and CUDA driver versions. The CLI normalizes the CUDA driver version as a string such as `"13.0"`; `GPUDeviceTracker.get_static_info()` returns the raw NVML CUDA driver integer.
 - `hardware.npus[].firmware`: per-NPU firmware metadata where available. Linux currently maps `mobilint-cli status` firmware rows by device order.
 - `inference.npu_driver_version`: host Mobilint NPU driver version when available. Linux may also include `inference.driver` with Aries/Regulus driver metadata parsed from `mobilint-cli status`.

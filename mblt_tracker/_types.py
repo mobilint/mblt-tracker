@@ -115,6 +115,8 @@ PcieDeviceInfo = TypedDict(
 
 class NpuDeviceInfo(PcieDeviceInfo, total=False):
     board_name: str
+    card_id: int
+    card_model: str
     firmware: NpuFirmwareInfo
 
 
