@@ -536,6 +536,47 @@ def test_npu_fetch_metrics_falls_back_when_status_query_fails(monkeypatch) -> No
     assert calls[1][-2:] == ["--sample-once", "--json"]
 
 
+def test_npu_json_fallback_honors_selected_npu_id(monkeypatch) -> None:
+    tracker = _make_tracker()
+    tracker._status_cmd = "mobilint-cli status -q"
+    tracker._npu_id = [1]
+
+    class Result:
+        def __init__(self, returncode: int, stdout: str):
+            self.returncode = returncode
+            self.stdout = stdout
+
+    def fake_run(command, *args, **kwargs):
+        if command == ["mobilint-cli", "status", "-q"]:
+            return Result(returncode=2, stdout="")
+        assert command[-2:] == ["--sample-once", "--json"]
+        return Result(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "ok": True,
+                    "npu_power_w": 2.11,
+                    "total_power_w": 7.87,
+                    "npu_util_pct": 0.0,
+                    "npu_mem_used_mb": 0,
+                    "npu_mem_total_mb": 16384,
+                    "npu_temp_c": 49,
+                }
+            ),
+        )
+
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.subprocess.run", fake_run)
+
+    assert tracker._fetch_metric_samples() == []
+
+    tracker._func_for_sched()
+
+    metrics = tracker.get_metric()
+    assert metrics["samples"] == 0
+    assert tracker.get_trace() == []
+    assert metrics["npu"] == {}
+
+
 def test_npu_fetch_metrics_falls_back_when_status_query_unparsable(
     monkeypatch,
 ) -> None:

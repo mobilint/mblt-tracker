@@ -142,7 +142,14 @@ class NPUDeviceTracker(BaseDeviceTracker):
         override = self.__dict__.get("_fetch_metrics")
         if callable(override):
             metrics = override()
-            return _metric_tuple_to_samples(metrics) if metrics is not None else None
+            return (
+                _filter_metric_samples(
+                    _metric_tuple_to_samples(metrics),
+                    getattr(self, "_npu_id", None),
+                )
+                if metrics is not None
+                else None
+            )
 
         output = _run_status_command(shlex.split(self._status_cmd))
         samples = (
@@ -155,7 +162,10 @@ class NPUDeviceTracker(BaseDeviceTracker):
 
         metrics = _parse_mobilint_status_json_metrics(output) if output is not None else None
         if metrics is not None:
-            return _metric_tuple_to_samples(metrics)
+            return _filter_metric_samples(
+                _metric_tuple_to_samples(metrics),
+                getattr(self, "_npu_id", None),
+            )
 
         if self._status_cmd != _DEFAULT_STATUS_CMD:
             return None
@@ -164,7 +174,14 @@ class NPUDeviceTracker(BaseDeviceTracker):
         if fallback_output is None:
             return None
         metrics = _parse_mobilint_status_metrics(fallback_output)
-        return _metric_tuple_to_samples(metrics) if metrics is not None else None
+        return (
+            _filter_metric_samples(
+                _metric_tuple_to_samples(metrics),
+                getattr(self, "_npu_id", None),
+            )
+            if metrics is not None
+            else None
+        )
 
     def _func_for_sched(self) -> None:
         """Sample NPU metrics via the background scheduler."""
