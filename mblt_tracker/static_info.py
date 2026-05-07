@@ -901,7 +901,12 @@ def _mobilint_query_device_to_static_info(
     card_model = _classify_mobilint_query_card_model(raw_device, device)
     if card_model is not None:
         device["card_model"] = card_model
-        device["card_id"] = 0 if card_model == "MLA400" else device["dev_no"]
+        dev_no_value = _to_int(device.get("dev_no"))
+        device["card_id"] = (
+            _mla400_static_card_id(dev_no_value, fallback_index)
+            if card_model == "MLA400"
+            else device["dev_no"]
+        )
 
     memory = raw_device.get("Memory")
     if isinstance(memory, dict):
@@ -910,6 +915,13 @@ def _mobilint_query_device_to_static_info(
             device["memory_total_bytes"] = int(total_mb * 1024 * 1024)
 
     return device
+
+
+def _mla400_static_card_id(dev_no: Optional[int], fallback_index: int) -> int:
+    """Return the logical MLA400 card id used by runtime metric grouping."""
+    if dev_no is None:
+        return fallback_index // 4
+    return dev_no // 4
 
 
 def _classify_mobilint_query_card_model(
