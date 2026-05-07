@@ -85,6 +85,28 @@ Connected NPUs                : 1
 """
 
 
+def _make_tracker() -> NPUDeviceTracker:
+    tracker = object.__new__(NPUDeviceTracker)
+    tracker._npu_power_glance = []
+    tracker._ddr_power_glance = []
+    tracker._pmic_power_glance = []
+    tracker._total_power_glance = []
+    tracker._npu_util_glance = []
+    tracker._npu_mem_used_mb_glance = []
+    tracker._npu_mem_used_pct_glance = []
+    tracker._npu_temp_glance = []
+    tracker._npu_mem_total_mb = None
+    tracker._power_trace = []
+    tracker._npu_power_trace = []
+    tracker._ddr_power_trace = []
+    tracker._pmic_power_trace = []
+    tracker._util_trace = []
+    tracker._mem_used_trace = []
+    tracker._mem_used_pct_trace = []
+    tracker._temp_trace = []
+    return tracker
+
+
 def test_npu_shell_parser_reads_temperature_from_status_output(
     monkeypatch, tmp_path
 ) -> None:
@@ -161,7 +183,104 @@ def test_parse_mobilint_status_query_output_to_nested_dict() -> None:
 def test_parse_mobilint_status_query_metrics() -> None:
     metrics = _parse_mobilint_status_query_metrics(STATUS_QUERY_OUTPUT)
 
-    assert metrics == (3.90, 12.85, 0.0, 0.0, 16384.0, 0.0, 39.0)
+    assert metrics == (3.90, 12.85, 3.92, 3.92, 0.0, 0.0, 16384.0, 0.0, 39.0)
+
+
+def test_npu_sampling_records_ddr_and_pmic_power_traces(monkeypatch) -> None:
+    tracker = _make_tracker()
+    monkeypatch.setattr(
+        tracker,
+        "_fetch_metrics",
+        lambda: (3.90, 12.85, 3.92, 3.93, 5.0, 128.0, 16384.0, None, 39.0),
+    )
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.time.time", lambda: 123.0)
+
+    tracker._func_for_sched()
+
+    assert tracker.get_trace() == [(123.0, 12.85)]
+    assert tracker.get_npu_power_trace() == [(123.0, 3.90)]
+    assert tracker.get_ddr_power_trace() == [(123.0, 3.92)]
+    assert tracker.get_pmic_power_trace() == [(123.0, 3.93)]
+    metrics = tracker.get_metric()
+    assert metrics["avg_npu_power_w"] == 3.90
+    assert metrics["avg_ddr_power_w"] == 3.92
+    assert metrics["avg_pmic_power_w"] == 3.93
+    assert metrics["ddr_power_samples"] == 1
+    assert metrics["pmic_power_samples"] == 1
+
+
+def test_npu_sampling_keeps_existing_metrics_when_ddr_and_pmic_missing(
+    monkeypatch,
+) -> None:
+    tracker = _make_tracker()
+    monkeypatch.setattr(
+        tracker,
+        "_fetch_metrics",
+        lambda: (3.90, 12.85, None, None, 5.0, 128.0, 16384.0, 0.78125, 39.0),
+    )
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.time.time", lambda: 456.0)
+
+    tracker._func_for_sched()
+
+    assert tracker.get_trace() == [(456.0, 12.85)]
+    assert tracker.get_npu_power_trace() == [(456.0, 3.90)]
+    assert tracker.get_ddr_power_trace() == []
+    assert tracker.get_pmic_power_trace() == []
+    metrics = tracker.get_metric()
+    assert metrics["avg_ddr_power_w"] is None
+    assert metrics["avg_pmic_power_w"] is None
+    assert metrics["ddr_power_samples"] == 0
+    assert metrics["pmic_power_samples"] == 0
+
+
+def test_npu_fetch_metrics_reads_legacy_json_ddr_and_pmic_power(monkeypatch) -> None:
+    tracker = _make_tracker()
+    tracker._status_cmd = "fake-status"
+
+    class Result:
+        returncode = 0
+        stdout = json.dumps(
+            {
+                "ok": True,
+                "npu_power_w": 3.9,
+                "total_power_w": 12.85,
+                "ddr_power_w": 3.92,
+                "pmic_power_w": 3.93,
+            }
+        )
+
+    monkeypatch.setattr(
+        "mblt_tracker.device_tracker_npu.subprocess.run",
+        lambda *args, **kwargs: Result(),
+    )
+
+    assert tracker._fetch_metrics() == (
+        3.9,
+        12.85,
+        3.92,
+        3.93,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+def test_npu_reset_clears_ddr_and_pmic_power_traces() -> None:
+    tracker = _make_tracker()
+    tracker._ddr_power_glance = [1.0]
+    tracker._pmic_power_glance = [2.0]
+    tracker._npu_power_trace = [(1.0, 3.0)]
+    tracker._ddr_power_trace = [(1.0, 1.0)]
+    tracker._pmic_power_trace = [(1.0, 2.0)]
+
+    tracker.reset()
+
+    assert tracker.get_npu_power_trace() == []
+    assert tracker.get_ddr_power_trace() == []
+    assert tracker.get_pmic_power_trace() == []
+    assert tracker.get_metric()["ddr_power_samples"] == 0
 
 
 def test_parse_mobilint_status_static_info_from_query_output() -> None:

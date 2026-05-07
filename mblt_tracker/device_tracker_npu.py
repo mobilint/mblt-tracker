@@ -46,6 +46,8 @@ class NPUDeviceTracker(BaseDeviceTracker):
         )
         self._job_id = "npu_device_track"
         self._npu_power_glance: list[float] = []
+        self._ddr_power_glance: list[float] = []
+        self._pmic_power_glance: list[float] = []
         self._total_power_glance: list[float] = []
         self._npu_util_glance: list[float] = []
         self._npu_mem_used_mb_glance: list[float] = []
@@ -53,6 +55,9 @@ class NPUDeviceTracker(BaseDeviceTracker):
         self._npu_temp_glance: list[float] = []
         self._npu_mem_total_mb: Optional[float] = None
         self._power_trace: list[tuple[float, float]] = []
+        self._npu_power_trace: list[tuple[float, float]] = []
+        self._ddr_power_trace: list[tuple[float, float]] = []
+        self._pmic_power_trace: list[tuple[float, float]] = []
         self._util_trace: list[tuple[float, float]] = []
         self._mem_used_trace: list[tuple[float, float]] = []
         self._mem_used_pct_trace: list[tuple[float, float]] = []
@@ -69,6 +74,8 @@ class NPUDeviceTracker(BaseDeviceTracker):
             Optional[float],
             Optional[float],
             Optional[float],
+            Optional[float],
+            Optional[float],
         ]
     ]:
         """Execute the status command and parse NPU metric output.
@@ -79,8 +86,9 @@ class NPUDeviceTracker(BaseDeviceTracker):
 
         Returns:
             Optional[tuple]: A tuple containing (npu_power_w, total_power_w,
-                npu_util_pct, npu_mem_used_mb, npu_mem_total_mb,
-                npu_mem_used_pct, npu_temp_c) if successful, else None.
+                ddr_power_w, pmic_power_w, npu_util_pct, npu_mem_used_mb,
+                npu_mem_total_mb, npu_mem_used_pct, npu_temp_c) if successful,
+                else None.
         """
         try:
             result = subprocess.run(
@@ -112,6 +120,13 @@ class NPUDeviceTracker(BaseDeviceTracker):
 
         npu_power_w = float(payload["npu_power_w"])
         total_power_w = float(payload["total_power_w"])
+        ddr_power_w = _get_optional_payload_float(
+            payload,
+            "ddr_power_w",
+            "npu_ddr_power_w",
+            "ram_power_w",
+        )
+        pmic_power_w = _get_optional_payload_float(payload, "pmic_power_w")
         npu_util_pct = payload.get("npu_util_pct")
         if npu_util_pct is not None:
             npu_util_pct = float(npu_util_pct)
@@ -137,6 +152,8 @@ class NPUDeviceTracker(BaseDeviceTracker):
         return (
             npu_power_w,
             total_power_w,
+            ddr_power_w,
+            pmic_power_w,
             npu_util_pct,
             npu_mem_used_mb,
             npu_mem_total_mb,
@@ -152,6 +169,8 @@ class NPUDeviceTracker(BaseDeviceTracker):
         (
             npu_power_w,
             total_power_w,
+            ddr_power_w,
+            pmic_power_w,
             npu_util_pct,
             npu_mem_used_mb,
             npu_mem_total_mb,
@@ -162,6 +181,13 @@ class NPUDeviceTracker(BaseDeviceTracker):
         self._npu_power_glance.append(npu_power_w)
         self._total_power_glance.append(total_power_w)
         self._power_trace.append((ts, total_power_w))
+        self._npu_power_trace.append((ts, npu_power_w))
+        if ddr_power_w is not None:
+            self._ddr_power_glance.append(ddr_power_w)
+            self._ddr_power_trace.append((ts, ddr_power_w))
+        if pmic_power_w is not None:
+            self._pmic_power_glance.append(pmic_power_w)
+            self._pmic_power_trace.append((ts, pmic_power_w))
         if npu_util_pct is not None:
             self._npu_util_glance.append(npu_util_pct)
             self._util_trace.append((ts, npu_util_pct))
@@ -187,6 +213,14 @@ class NPUDeviceTracker(BaseDeviceTracker):
         npu_avg = (
             float(np.mean(self._npu_power_glance)) if self._npu_power_glance else None
         )
+        ddr_avg = (
+            float(np.mean(self._ddr_power_glance)) if self._ddr_power_glance else None
+        )
+        pmic_avg = (
+            float(np.mean(self._pmic_power_glance))
+            if self._pmic_power_glance
+            else None
+        )
         total_avg = (
             float(np.mean(self._total_power_glance))
             if self._total_power_glance
@@ -199,6 +233,24 @@ class NPUDeviceTracker(BaseDeviceTracker):
         )
         npu_max = (
             float(np.max(self._npu_power_glance)) if self._npu_power_glance else None
+        )
+        ddr_p99 = (
+            float(np.percentile(self._ddr_power_glance, 99))
+            if self._ddr_power_glance
+            else None
+        )
+        ddr_max = (
+            float(np.max(self._ddr_power_glance)) if self._ddr_power_glance else None
+        )
+        pmic_p99 = (
+            float(np.percentile(self._pmic_power_glance, 99))
+            if self._pmic_power_glance
+            else None
+        )
+        pmic_max = (
+            float(np.max(self._pmic_power_glance))
+            if self._pmic_power_glance
+            else None
         )
         total_p99 = (
             float(np.percentile(self._total_power_glance, 99))
@@ -269,6 +321,12 @@ class NPUDeviceTracker(BaseDeviceTracker):
             "avg_npu_power_w": npu_avg,
             "p99_npu_power_w": npu_p99,
             "max_npu_power_w": npu_max,
+            "avg_ddr_power_w": ddr_avg,
+            "p99_ddr_power_w": ddr_p99,
+            "max_ddr_power_w": ddr_max,
+            "avg_pmic_power_w": pmic_avg,
+            "p99_pmic_power_w": pmic_p99,
+            "max_pmic_power_w": pmic_max,
             "avg_total_power_w": total_avg,
             "p99_total_power_w": total_p99,
             "max_total_power_w": total_max,
@@ -290,6 +348,9 @@ class NPUDeviceTracker(BaseDeviceTracker):
             "p99_temperature_c": npu_temp_p99,
             "max_temperature_c": npu_temp_max,
             "samples": len(self._power_trace),
+            "npu_power_samples": len(self._npu_power_trace),
+            "ddr_power_samples": len(self._ddr_power_trace),
+            "pmic_power_samples": len(self._pmic_power_trace),
             "util_samples": len(self._util_trace),
         }
 
@@ -352,6 +413,18 @@ class NPUDeviceTracker(BaseDeviceTracker):
         """
         return list(self._util_trace)
 
+    def get_npu_power_trace(self) -> list[tuple[float, float]]:
+        """Return a time-series trace of NPU core power."""
+        return list(self._npu_power_trace)
+
+    def get_ddr_power_trace(self) -> list[tuple[float, float]]:
+        """Return a time-series trace of on-board NPU DDR power."""
+        return list(self._ddr_power_trace)
+
+    def get_pmic_power_trace(self) -> list[tuple[float, float]]:
+        """Return a time-series trace of NPU PMIC power."""
+        return list(self._pmic_power_trace)
+
     def get_temp_trace(self) -> list[tuple[float, float]]:
         """Return a time-series trace of NPU temperature."""
         return list(self._temp_trace)
@@ -359,6 +432,8 @@ class NPUDeviceTracker(BaseDeviceTracker):
     def reset(self) -> None:
         """Reset all collected NPU metrics and traces."""
         self._npu_power_glance = []
+        self._ddr_power_glance = []
+        self._pmic_power_glance = []
         self._total_power_glance = []
         self._npu_util_glance = []
         self._npu_mem_used_mb_glance = []
@@ -366,6 +441,9 @@ class NPUDeviceTracker(BaseDeviceTracker):
         self._npu_temp_glance = []
         self._npu_mem_total_mb = None
         self._power_trace = []
+        self._npu_power_trace = []
+        self._ddr_power_trace = []
+        self._pmic_power_trace = []
         self._util_trace = []
         self._mem_used_trace = []
         self._mem_used_pct_trace = []
@@ -388,6 +466,8 @@ def _parse_mobilint_status_query_metrics(
         Optional[float],
         Optional[float],
         Optional[float],
+        Optional[float],
+        Optional[float],
     ]
 ]:
     parsed = parse_mobilint_status_query_output(status_output)
@@ -405,6 +485,8 @@ def _parse_mobilint_status_query_metrics(
     total_power_w = _parse_status_number(power.get("Total"))
     if npu_power_w is None or total_power_w is None:
         return None
+    ddr_power_w = _parse_status_number(power.get("DDR"))
+    pmic_power_w = _parse_status_number(power.get("PMIC"))
 
     utilization = first_device.get("Utilization")
     npu_util_pct = None
@@ -425,12 +507,25 @@ def _parse_mobilint_status_query_metrics(
     return (
         npu_power_w,
         total_power_w,
+        ddr_power_w,
+        pmic_power_w,
         npu_util_pct,
         npu_mem_used_mb,
         npu_mem_total_mb,
         npu_mem_used_pct,
         npu_temp_c,
     )
+
+
+def _get_optional_payload_float(
+    payload: dict[str, object],
+    *keys: str,
+) -> Optional[float]:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return float(value)
+    return None
 
 
 def _parse_status_number(value: object) -> Optional[float]:
