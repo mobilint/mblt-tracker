@@ -130,7 +130,7 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 14174498816,
+      "available_bytes": 15478919168,
       "dimms": [
         {
           "capacity_bytes": 17179869184,
@@ -160,8 +160,27 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
     },
     "gpus": [
       {
+        "bus_address": "PCI\\VEN_8086&DEV_4680&SUBSYS_7D961462&REV_0C\\3&11583659&0&10",
+        "class": "0x038000",
+        "dev_no": 0,
+        "device_id": "0x4680",
+        "driver_date": "/Date(1764547200000)/",
+        "driver_description": "Intel(R) UHD Graphics 770",
+        "driver_provider": "Intel Corporation",
+        "driver_version": "32.0.101.7082",
+        "manufacturer": "Intel Corporation",
+        "name": "Intel(R) UHD Graphics 770",
+        "pnp_device_id": "PCI\\VEN_8086&DEV_4680&SUBSYS_7D961462&REV_0C\\3&11583659&0&10",
+        "revision": "0x0c",
+        "status": "OK",
+        "subsystem_device_id": "0x7d96",
+        "subsystem_vendor_id": "0x1462",
+        "vendor_id": "0x8086"
+      },
+      {
         "architecture": "Ampere",
         "bus_address": "0000:03:00.0",
+        "class": "0x030000",
         "dev_no": 0,
         "device_id": "0x2204",
         "driver_date": "/Date(1773705600000)/",
@@ -169,7 +188,7 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
         "driver_provider": "NVIDIA",
         "driver_version": "595.97",
         "lane_width": "x4",
-        "link_generation": "Gen2",
+        "link_generation": "Gen1",
         "manufacturer": "NVIDIA",
         "memory_total_bytes": 25769803776,
         "name": "NVIDIA GeForce RTX 3090",
@@ -184,6 +203,7 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
     "npus": [
       {
         "bus_address": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008",
+        "class": "0x078000",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
         "dev_no": 0,
@@ -255,7 +275,7 @@ $ mblt-tracker collect
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 326259752960,
+      "available_bytes": 325414416384,
       "dimms": [
         {
           "capacity_bytes": 68719476736,
@@ -329,19 +349,27 @@ $ mblt-tracker collect
     },
     "gpus": [
       {
+        "bus_address": "0000:02:00.0",
+        "class": "0x030000",
+        "dev_no": 0,
+        "device_id": "0x2000",
+        "manufacturer": "ASPEED Technology, Inc.",
+        "name": "ASPEED Graphics Family",
+        "revision": "0x52",
+        "subsystem_device_id": "0x1c6b",
+        "subsystem_vendor_id": "0x15d9",
+        "vendor_id": "0x1a03"
+      },
+      {
         "architecture": "Blackwell",
         "bus_address": "0000:17:00.0",
         "class": "0x030000",
-        "current_link_speed": "2.5 GT/s PCIe",
-        "current_link_width": "16",
         "dev_no": 0,
         "device_id": "0x2bb1",
         "driver_version": "580.95.05",
         "lane_width": "x16",
         "link_generation": "Gen1",
         "manufacturer": "NVIDIA Corporation",
-        "max_link_speed": "32.0 GT/s PCIe",
-        "max_link_width": "16",
         "memory_total_bytes": 102641958912,
         "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
         "revision": "0xa1",
@@ -353,16 +381,12 @@ $ mblt-tracker collect
         "architecture": "Blackwell",
         "bus_address": "0000:e1:00.0",
         "class": "0x030000",
-        "current_link_speed": "2.5 GT/s PCIe",
-        "current_link_width": "16",
         "dev_no": 1,
         "device_id": "0x2bb1",
         "driver_version": "580.95.05",
         "lane_width": "x16",
         "link_generation": "Gen1",
         "manufacturer": "NVIDIA Corporation",
-        "max_link_speed": "32.0 GT/s PCIe",
-        "max_link_width": "16",
         "memory_total_bytes": 102641958912,
         "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
         "revision": "0xa1",
