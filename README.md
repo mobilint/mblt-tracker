@@ -116,7 +116,12 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
 
 ### Example Output
 
-#### Windows
+The following examples show representative `mblt-tracker collect` outputs from
+three host configurations: Windows with one MLA100-class Mobilint NPU and one
+NVIDIA GPU, Linux with one MLA100 card, and Linux with one MLA400 card exposed as
+four Aries devices.
+
+#### Windows: MLA100 + NVIDIA GPU
 
 ```powershell
 > mblt-tracker collect
@@ -130,7 +135,7 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 15478919168,
+      "available_bytes": 13193584640,
       "dimms": [
         {
           "capacity_bytes": 17179869184,
@@ -260,7 +265,7 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
 }
 ```
 
-#### Linux
+#### Linux: MLA100 + NVIDIA GPUs
 
 ```bash
 $ mblt-tracker collect
@@ -275,7 +280,7 @@ $ mblt-tracker collect
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 325414416384,
+      "available_bytes": 321980788736,
       "dimms": [
         {
           "capacity_bytes": 68719476736,
@@ -399,24 +404,29 @@ $ mblt-tracker collect
       {
         "board_name": "aries0",
         "bus_address": "0000:bd:00.0",
-        "class": "0x078000",
+        "card_id": 0,
+        "card_model": "MLA100",
+        "class": "0x7800002",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
         "dev_no": 0,
-        "device_id": "0x0000",
+        "device_id": "0x0",
         "firmware": {
-          "version": "fb9a5980"
+          "revision": "0",
+          "version": "1.1"
         },
-        "lane_width": "x8",
-        "link_generation": "Gen4",
+        "lane_width": "8",
+        "link_generation": "4",
         "manufacturer": "Mobilint, Inc.",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
         "name": "Aries",
+        "product": "Aries",
         "revision": "0x02",
         "subsystem_device_id": "0x1093",
-        "subsystem_vendor_id": "0x0401",
-        "vendor_id": "0x209f"
+        "subsystem_vendor_id": "0x401",
+        "vendor_id": "0x209F"
       }
     ]
   },
@@ -430,6 +440,10 @@ $ mblt-tracker collect
     "cuda": {
       "version": "12.8"
     },
+    "driver": {
+      "aries_version": "1.12.0",
+      "regulus_version": "N/A"
+    },
     "gpu": {
       "cuda_driver": {
         "version": "13.0"
@@ -438,10 +452,196 @@ $ mblt-tracker collect
         "version": "580.95.05"
       }
     },
+    "npu_driver_version": "1.12.0",
     "os": {
       "kernel_version": "6.8.0-110-generic",
       "name": "Linux",
       "version": "Ubuntu 24.04 LTS"
+    },
+    "qbcompiler": {
+      "version": "not_installed"
+    },
+    "qbruntime": {
+      "version": "v1.2.0"
+    }
+  }
+}
+```
+
+#### Linux: MLA400 card (4 Aries devices)
+
+```bash
+$ mblt-tracker collect
+[sudo] password for dmidecode:
+Warning: NVML not available. GPU information will not be collected.
+{
+  "hardware": {
+    "cpu": {
+      "architecture": "x86_64",
+      "logical_cores": 16,
+      "model_name": "11th Gen Intel(R) Core(TM) i7-11700K @ 3.60GHz",
+      "physical_cores": 8,
+      "vendor": "GenuineIntel"
+    },
+    "dram": {
+      "available_bytes": 15836319744,
+      "dimms": [
+        {
+          "capacity_bytes": 34359738368,
+          "configured_speed_mhz": 3200,
+          "data_width_bits": 64,
+          "manufacturer": "Samsung",
+          "part_number": "M378A4G43AB2-CWE",
+          "serial_number": "331C9F38",
+          "speed_mhz": 3200,
+          "total_width_bits": 64,
+          "type": "DDR4"
+        },
+        {
+          "capacity_bytes": 34359738368,
+          "configured_speed_mhz": 3200,
+          "data_width_bits": 64,
+          "manufacturer": "Samsung",
+          "part_number": "M378A4G43AB2-CWE",
+          "serial_number": "331CA394",
+          "speed_mhz": 3200,
+          "total_width_bits": 64,
+          "type": "DDR4"
+        }
+      ],
+      "theoretical_bandwidth_gbps": 51.2,
+      "total_bytes": 67178881024
+    },
+    "npus": [
+      {
+        "board_name": "aries0",
+        "bus_address": "0000:03:00.0",
+        "card_id": 0,
+        "card_model": "MLA400",
+        "class": "0x7800002",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 0,
+        "device_id": "0x0",
+        "firmware": {
+          "revision": "0",
+          "version": "1.2.5"
+        },
+        "lane_width": "8",
+        "link_generation": "4",
+        "manufacturer": "Mobilint, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
+        "name": "Aries",
+        "product": "Aries",
+        "revision": "0x2",
+        "subsystem_device_id": "0x108B",
+        "subsystem_vendor_id": "0x402",
+        "vendor_id": "0x209F"
+      },
+      {
+        "board_name": "aries1",
+        "bus_address": "0000:04:00.0",
+        "card_id": 0,
+        "card_model": "MLA400",
+        "class": "0x7800002",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 1,
+        "device_id": "0x0",
+        "firmware": {
+          "revision": "0",
+          "version": "1.2.5"
+        },
+        "lane_width": "8",
+        "link_generation": "4",
+        "manufacturer": "Mobilint, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
+        "name": "Aries",
+        "product": "Aries",
+        "revision": "0x2",
+        "subsystem_device_id": "0x108B",
+        "subsystem_vendor_id": "0x402",
+        "vendor_id": "0x209F"
+      },
+      {
+        "board_name": "aries2",
+        "bus_address": "0000:05:00.0",
+        "card_id": 0,
+        "card_model": "MLA400",
+        "class": "0x7800002",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 2,
+        "device_id": "0x0",
+        "firmware": {
+          "revision": "0",
+          "version": "1.2.5"
+        },
+        "lane_width": "8",
+        "link_generation": "4",
+        "manufacturer": "Mobilint, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
+        "name": "Aries",
+        "product": "Aries",
+        "revision": "0x2",
+        "subsystem_device_id": "0x108B",
+        "subsystem_vendor_id": "0x402",
+        "vendor_id": "0x209F"
+      },
+      {
+        "board_name": "aries3",
+        "bus_address": "0000:06:00.0",
+        "card_id": 0,
+        "card_model": "MLA400",
+        "class": "0x7800002",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 3,
+        "device_id": "0x0",
+        "firmware": {
+          "revision": "0",
+          "version": "1.2.5"
+        },
+        "lane_width": "8",
+        "link_generation": "4",
+        "manufacturer": "Mobilint, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
+        "name": "Aries",
+        "product": "Aries",
+        "revision": "0x2",
+        "subsystem_device_id": "0x108B",
+        "subsystem_vendor_id": "0x402",
+        "vendor_id": "0x209F"
+      }
+    ]
+  },
+  "inference": {
+    "cpu": {
+      "governor": "powersave",
+      "max_processor_state_pct": null,
+      "min_processor_state_pct": null,
+      "power_plan": null
+    },
+    "cuda": {
+      "version": "12.8"
+    },
+    "driver": {
+      "aries_version": "1.12.0",
+      "regulus_version": "N/A"
+    },
+    "npu_driver_version": "1.12.0",
+    "os": {
+      "kernel_version": "6.17.0-20-generic",
+      "name": "Linux",
+      "version": "Ubuntu 24.04.2 LTS"
     },
     "qbcompiler": {
       "version": "not_installed"
