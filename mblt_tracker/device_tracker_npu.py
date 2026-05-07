@@ -885,9 +885,9 @@ def _normalize_status_hex(value: object) -> Optional[str]:
     value = value.strip().lower()
     if not value:
         return None
-    if not value.startswith("0x"):
-        value = f"0x{value}"
-    return value
+    hex_digits = value[2:] if value.startswith("0x") else value
+    hex_digits = hex_digits.lstrip("0") or "0"
+    return f"0x{hex_digits}"
 
 
 def _parse_mobilint_status_metrics(status_output: str):

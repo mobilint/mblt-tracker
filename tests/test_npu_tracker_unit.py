@@ -330,6 +330,19 @@ def test_parse_mobilint_status_query_metric_samples_classifies_mla100() -> None:
     assert samples[0]["goldfinger_power_w"] is None
 
 
+def test_parse_mobilint_status_query_metric_samples_classifies_zero_padded_mla100() -> None:
+    status_output = STATUS_QUERY_OUTPUT.replace(
+        "Sub Vendor ID         : 0x401",
+        "Sub Vendor ID         : 0x0401",
+    )
+    samples = _parse_mobilint_status_query_metric_samples(status_output)
+
+    assert samples is not None
+    assert len(samples) == 1
+    assert samples[0]["card_model"] == "MLA100"
+    assert samples[0]["card_id"] == 0
+
+
 def test_parse_mobilint_status_query_metric_samples_groups_mla400() -> None:
     samples = _parse_mobilint_status_query_metric_samples(MLA400_STATUS_QUERY_OUTPUT)
 
@@ -343,6 +356,26 @@ def test_parse_mobilint_status_query_metric_samples_groups_mla400() -> None:
     assert sample["goldfinger_power_w"] == pytest.approx(27.79)
     assert sample["npu_mem_used_mb"] == pytest.approx(51793.0)
     assert sample["npu_mem_total_mb"] == pytest.approx(65536.0)
+
+
+def test_parse_mobilint_status_query_metric_samples_groups_zero_padded_mla400_without_goldfinger() -> None:
+    status_output = MLA400_STATUS_QUERY_OUTPUT.replace(
+        "        GOLDFINGER            : 27.79 W\n",
+        "",
+    ).replace(
+        "        GOLDFINGER            : 0.00 W\n",
+        "",
+    ).replace(
+        "Sub Vendor ID         : 0x402",
+        "Sub Vendor ID         : 0x0402",
+    )
+    samples = _parse_mobilint_status_query_metric_samples(status_output)
+
+    assert samples is not None
+    assert len(samples) == 1
+    assert samples[0]["card_model"] == "MLA400"
+    assert samples[0]["card_id"] == 0
+    assert samples[0]["chip_count"] == 4
 
 
 def test_parse_mobilint_status_query_metric_samples_keeps_mla400_offset_card_id() -> None:
