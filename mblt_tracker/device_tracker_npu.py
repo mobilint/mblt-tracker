@@ -16,7 +16,7 @@ from .static_info import (
     get_all_pcie_devices,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
-    parse_mobilint_status_quiet_output,
+    parse_mobilint_status_query_output,
     parse_mobilint_status_static_info,
     run_command,
 )
@@ -74,7 +74,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
         """Execute the status command and parse NPU metric output.
 
         The default path uses ``mobilint-cli status -q`` and parses the
-        indentation-based quiet format directly. For backward compatibility,
+        indentation-based query format directly. For backward compatibility,
         custom commands that return the legacy JSON payload are still accepted.
 
         Returns:
@@ -96,7 +96,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
             return None
 
         output = result.stdout.strip()
-        metrics = _parse_mobilint_status_quiet_metrics(output)
+        metrics = _parse_mobilint_status_query_metrics(output)
         if metrics is not None:
             return metrics
 
@@ -377,7 +377,7 @@ def _parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
     return parse_mobilint_status_static_info(status_output)
 
 
-def _parse_mobilint_status_quiet_metrics(
+def _parse_mobilint_status_query_metrics(
     status_output: str,
 ) -> Optional[
     tuple[
@@ -390,7 +390,7 @@ def _parse_mobilint_status_quiet_metrics(
         Optional[float],
     ]
 ]:
-    parsed = parse_mobilint_status_quiet_output(status_output)
+    parsed = parse_mobilint_status_query_output(status_output)
     devices = parsed.get("devices")
     if not isinstance(devices, list) or not devices:
         return None

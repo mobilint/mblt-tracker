@@ -720,12 +720,12 @@ def parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
     """Parse static NPU fields from ``mobilint-cli status`` output.
 
     Both the legacy table output and the code-friendly ``status -q`` output are
-    supported. The quiet output is parsed as an indentation-based dictionary
+    supported. The query output is parsed as an indentation-based dictionary
     first because its shape is more stable than the human-readable table.
     """
-    quiet_info = _parse_mobilint_status_quiet_static_info(status_output)
-    if quiet_info:
-        return quiet_info
+    query_info = _parse_mobilint_status_query_static_info(status_output)
+    if query_info:
+        return query_info
 
     info: dict[str, object] = {}
     driver_match = re.search(
@@ -762,10 +762,10 @@ def parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
     return info
 
 
-def parse_mobilint_status_quiet_output(status_output: str) -> dict[str, object]:
+def parse_mobilint_status_query_output(status_output: str) -> dict[str, object]:
     """Parse ``mobilint-cli status -q`` output into a nested dictionary.
 
-    The quiet format uses indentation to represent sections and ``Key : Value``
+    The query format uses indentation to represent sections and ``Key : Value``
     pairs for leaves. Device blocks are introduced by paths such as
     ``/dev/aries0`` and are collected under the top-level ``devices`` list.
     Values are intentionally kept as strings; consumers can convert units in a
@@ -807,10 +807,15 @@ def parse_mobilint_status_quiet_output(status_output: str) -> dict[str, object]:
     return root
 
 
-def _parse_mobilint_status_quiet_static_info(
+def parse_mobilint_status_quiet_output(status_output: str) -> dict[str, object]:
+    """Deprecated alias for :func:`parse_mobilint_status_query_output`."""
+    return parse_mobilint_status_query_output(status_output)
+
+
+def _parse_mobilint_status_query_static_info(
     status_output: str,
 ) -> dict[str, object]:
-    parsed = parse_mobilint_status_quiet_output(status_output)
+    parsed = parse_mobilint_status_query_output(status_output)
     if not parsed.get("devices") and not any(
         key.startswith("Driver Version") for key in parsed
     ):
@@ -837,7 +842,7 @@ def _parse_mobilint_status_quiet_static_info(
         for index, raw_device in enumerate(devices):
             if not isinstance(raw_device, dict):
                 continue
-            device = _mobilint_quiet_device_to_static_info(raw_device, index)
+            device = _mobilint_query_device_to_static_info(raw_device, index)
             npus.append(device)
 
     info: dict[str, object] = {}
@@ -848,7 +853,7 @@ def _parse_mobilint_status_quiet_static_info(
     return info
 
 
-def _mobilint_quiet_device_to_static_info(
+def _mobilint_query_device_to_static_info(
     raw_device: dict[str, object], fallback_index: int
 ) -> dict[str, object]:
     path = _get_str(raw_device.get("path"))

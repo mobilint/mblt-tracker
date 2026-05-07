@@ -8,10 +8,10 @@ import pytest
 
 from mblt_tracker.device_tracker_npu import (
     NPUDeviceTracker,
-    _parse_mobilint_status_quiet_metrics,
+    _parse_mobilint_status_query_metrics,
     _parse_mobilint_status_static_info,
 )
-from mblt_tracker.static_info import parse_mobilint_status_quiet_output
+from mblt_tracker.static_info import parse_mobilint_status_query_output
 
 STATUS_OUTPUT = """2026-04-15 16:06:59
 +------------------------------------------------------------------------------------------+
@@ -25,7 +25,7 @@ STATUS_OUTPUT = """2026-04-15 16:06:59
 +-------------------------------+-----------------+-------------------+--------------------+
 """
 
-STATUS_QUIET_OUTPUT = """Timestamp                     : 2026-05-07 04:10:46
+STATUS_QUERY_OUTPUT = """Timestamp                     : 2026-05-07 04:10:46
 Driver Version (Aries)        : 1.12.0 (Rev: 1)
 Driver Version (Regulus)      : N/A
 Connected NPUs                : 1
@@ -143,8 +143,8 @@ def test_parse_mobilint_status_static_info() -> None:
     }
 
 
-def test_parse_mobilint_status_quiet_output_to_nested_dict() -> None:
-    parsed = parse_mobilint_status_quiet_output(STATUS_QUIET_OUTPUT)
+def test_parse_mobilint_status_query_output_to_nested_dict() -> None:
+    parsed = parse_mobilint_status_query_output(STATUS_QUERY_OUTPUT)
 
     assert parsed["Driver Version (Aries)"] == "1.12.0 (Rev: 1)"
     assert parsed["Connected NPUs"] == "1"
@@ -158,14 +158,14 @@ def test_parse_mobilint_status_quiet_output_to_nested_dict() -> None:
     assert device["Utilization"]["Cluster0"]["Core3"] == "0.00 %"
 
 
-def test_parse_mobilint_status_quiet_metrics() -> None:
-    metrics = _parse_mobilint_status_quiet_metrics(STATUS_QUIET_OUTPUT)
+def test_parse_mobilint_status_query_metrics() -> None:
+    metrics = _parse_mobilint_status_query_metrics(STATUS_QUERY_OUTPUT)
 
     assert metrics == (3.90, 12.85, 0.0, 0.0, 16384.0, 0.0, 39.0)
 
 
-def test_parse_mobilint_status_static_info_from_quiet_output() -> None:
-    info = _parse_mobilint_status_static_info(STATUS_QUIET_OUTPUT)
+def test_parse_mobilint_status_static_info_from_query_output() -> None:
+    info = _parse_mobilint_status_static_info(STATUS_QUERY_OUTPUT)
 
     assert info["inference"] == {
         "npu_driver_version": "1.12.0",
