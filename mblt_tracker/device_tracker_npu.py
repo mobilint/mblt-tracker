@@ -13,6 +13,7 @@ from .device_tracker import BaseDeviceTracker
 from .static_info import (
     _deep_merge,
     _filter_npu_metadata_to_selected_devices,
+    get_all_pcie_devices,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
     parse_mobilint_status_static_info,
@@ -302,17 +303,27 @@ class NPUDeviceTracker(BaseDeviceTracker):
         pcie_device_id = os.environ.get("MBLT_TRACKER_NPU_PCI_DEVICE_ID")
         pcie_class_filter = os.environ.get("MBLT_TRACKER_NPU_PCI_CLASS_FILTER")
         has_pcie_filter = any((pcie_vendor_id, pcie_device_id, pcie_class_filter))
+        pcie_devices = get_all_pcie_devices()
         info = get_pcie_static_info(
             vendor_id=pcie_vendor_id,
             device_id=pcie_device_id,
             class_filter=pcie_class_filter,
+            devices=pcie_devices,
         )
         hardware = info.get("hardware", {})
         filtered_npus = []
         if isinstance(hardware, dict) and isinstance(hardware.get("npus"), list):
             filtered_npus = [npu for npu in hardware["npus"] if isinstance(npu, dict)]
         if platform.system() == "Windows":
-            _deep_merge(info, get_windows_npu_driver_firmware_info())
+            _deep_merge(
+                info,
+                get_windows_npu_driver_firmware_info(
+                    vendor_id=pcie_vendor_id,
+                    device_id=pcie_device_id,
+                    class_filter=pcie_class_filter,
+                    devices=pcie_devices,
+                ),
+            )
         else:
             status_output = run_command(["mobilint-cli", "status"])
             if status_output:

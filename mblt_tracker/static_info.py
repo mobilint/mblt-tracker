@@ -983,7 +983,7 @@ def _read_pcie_devices_windows() -> list[dict[str, object]]:
             "-Command",
             "Get-CimInstance Win32_PnPEntity | "
             "Where-Object { $_.PNPDeviceID -like 'PCI\\*' } | "
-            "Select-Object Name,PNPDeviceID,DeviceID,Manufacturer,Status | "
+            "Select-Object Name,PNPDeviceID,DeviceID,HardwareID,CompatibleID,Manufacturer,Status | "
             "ConvertTo-Json -Depth 3",
         ]
     )
@@ -1005,7 +1005,10 @@ def _read_pcie_devices_windows() -> list[dict[str, object]]:
     devices = []
     for entity in entities:
         pnp_device_id = str(entity.get("PNPDeviceID") or entity.get("DeviceID") or "")
-        device = _parse_windows_pci_id(pnp_device_id)
+        device = _parse_windows_pci_id(
+            pnp_device_id,
+            _windows_pci_auxiliary_ids(entity),
+        )
         if device is None:
             continue
 
@@ -1166,6 +1169,18 @@ def _read_windows_pci_link_properties(
     return properties
 
 
+def _windows_pci_auxiliary_ids(entity: Mapping[str, object]) -> list[str]:
+    """Return auxiliary Windows PCI IDs that may contain class code metadata."""
+    auxiliary_ids = []
+    for key in ("HardwareID", "CompatibleID"):
+        value = entity.get(key)
+        if isinstance(value, str):
+            auxiliary_ids.append(value)
+        elif isinstance(value, list):
+            auxiliary_ids.extend(item for item in value if isinstance(item, str))
+    return auxiliary_ids
+
+
 def get_windows_npu_driver_firmware_info(
     vendor_ids: tuple[str, ...] = ("1ed5", "209f"),
     vendor_id: str | None = None,
@@ -1250,15 +1265,21 @@ def _windows_link_speed_to_text(value: object) -> str | None:
     return speeds.get(speed)
 
 
-def _parse_windows_pci_id(pnp_device_id: str) -> dict[str, object] | None:
+def _parse_windows_pci_id(
+    pnp_device_id: str,
+    auxiliary_ids: Sequence[str] | None = None,
+) -> dict[str, object] | None:
     if not pnp_device_id.upper().startswith("PCI\\"):
         return None
 
-    def match_hex(pattern: str) -> str | None:
-        match = re.search(pattern, pnp_device_id, re.IGNORECASE)
-        if match is None:
-            return None
-        return f"0x{match.group(1).lower()}"
+    pci_ids = [pnp_device_id, *(auxiliary_ids or [])]
+
+    def match_hex(pattern: str, values: Sequence[str] = pci_ids) -> str | None:
+        for value in values:
+            match = re.search(pattern, value, re.IGNORECASE)
+            if match is not None:
+                return f"0x{match.group(1).lower()}"
+        return None
 
     vendor_id = match_hex(r"VEN_([0-9A-F]{4})")
     device_id = match_hex(r"DEV_([0-9A-F]{4})")
@@ -1276,7 +1297,7 @@ def _parse_windows_pci_id(pnp_device_id: str) -> dict[str, object] | None:
         device["subsystem_device_id"] = f"0x{value[:4]}"
         device["subsystem_vendor_id"] = f"0x{value[4:]}"
 
-    class_code = match_hex(r"CC_([0-9A-F]{2,6})")
+    class_code = _match_windows_pci_class_code(pci_ids)
     if class_code is not None:
         device["class"] = class_code
     revision = match_hex(r"REV_([0-9A-F]{2})")
@@ -1284,6 +1305,16 @@ def _parse_windows_pci_id(pnp_device_id: str) -> dict[str, object] | None:
         device["revision"] = revision
 
     return device
+
+
+def _match_windows_pci_class_code(pci_ids: Sequence[str]) -> str | None:
+    class_codes = []
+    for pci_id in pci_ids:
+        for match in re.finditer(r"CC_([0-9A-F]{2,6})", pci_id, re.IGNORECASE):
+            class_codes.append(match.group(1).lower())
+    if not class_codes:
+        return None
+    return f"0x{max(class_codes, key=len)}"
 
 
 def _read_pcie_devices(sysfs_root: Path) -> list[dict[str, object]]:

@@ -20,6 +20,7 @@ from mblt_tracker.static_info import (
     _normalize_windows_power_plan_name,
     _parse_linux_dmidecode_memory,
     _parse_windows_active_power_scheme,
+    _parse_windows_pci_id,
     _parse_windows_power_setting_ac_value,
     _read_dram_dimms_linux,
     _read_lspci_device_metadata,
@@ -913,6 +914,79 @@ def test_get_pcie_static_info_omits_raw_devices_by_default(
     info = get_pcie_static_info()
 
     assert info == {}
+
+
+def test_parse_windows_pci_id_reads_class_from_auxiliary_ids() -> None:
+    device = _parse_windows_pci_id(
+        "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008",
+        [
+            "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02",
+            "PCI\\VEN_209F&DEV_0000&CC_120000",
+            "PCI\\VEN_209F&DEV_0000&CC_12",
+        ],
+    )
+
+    assert device is not None
+    assert device["vendor_id"] == "0x209f"
+    assert device["device_id"] == "0x0000"
+    assert device["class"] == "0x120000"
+    assert device["revision"] == "0x02"
+
+
+def test_get_pcie_static_info_filters_windows_devices_by_auxiliary_class(
+    monkeypatch,
+) -> None:
+    output = json.dumps(
+        [
+            {
+                "Name": "MOBILINT NPU Accelerator",
+                "PNPDeviceID": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&1",
+                "HardwareID": [
+                    "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02",
+                    "PCI\\VEN_209F&DEV_0000&CC_120000",
+                ],
+                "CompatibleID": ["PCI\\VEN_209F&DEV_0000&CC_12"],
+                "Manufacturer": "MOBILINT, Inc.",
+                "Status": "OK",
+            },
+            {
+                "Name": "Other Device",
+                "PNPDeviceID": "PCI\\VEN_1234&DEV_ABCD\\4&2",
+                "HardwareID": ["PCI\\VEN_1234&DEV_ABCD&CC_060400"],
+                "Manufacturer": "Other",
+                "Status": "OK",
+            },
+        ]
+    )
+
+    monkeypatch.setattr(static_info.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(static_info, "run_command", lambda _command: output)
+    monkeypatch.setattr(
+        static_info,
+        "_read_windows_pci_link_properties",
+        lambda _instance_ids: {},
+    )
+
+    info = get_pcie_static_info(class_filter="0x12")
+
+    hardware = cast(dict[str, object], info["hardware"])
+    npus = cast(list[dict[str, object]], hardware["npus"])
+    assert npus == [
+        {
+            "dev_no": 0,
+            "bus_address": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&1",
+            "vendor_id": "0x209f",
+            "device_id": "0x0000",
+            "subsystem_device_id": "0x1093",
+            "subsystem_vendor_id": "0x0402",
+            "class": "0x120000",
+            "name": "MOBILINT NPU Accelerator",
+            "manufacturer": "MOBILINT, Inc.",
+            "status": "OK",
+            "pnp_device_id": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&1",
+            "revision": "0x02",
+        }
+    ]
 
 
 def test_parse_windows_active_power_scheme_english_output() -> None:
