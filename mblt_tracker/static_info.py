@@ -898,6 +898,11 @@ def _mobilint_query_device_to_static_info(
             if value is not None:
                 device[target_key] = value
 
+    card_model = _classify_mobilint_query_card_model(raw_device, device)
+    if card_model is not None:
+        device["card_model"] = card_model
+        device["card_id"] = 0 if card_model == "MLA400" else device["dev_no"]
+
     memory = raw_device.get("Memory")
     if isinstance(memory, dict):
         total_mb = _parse_number_from_unit_value(_get_str(memory.get("Total")))
@@ -905,6 +910,21 @@ def _mobilint_query_device_to_static_info(
             device["memory_total_bytes"] = int(total_mb * 1024 * 1024)
 
     return device
+
+
+def _classify_mobilint_query_card_model(
+    raw_device: Mapping[str, object], device: Mapping[str, object]
+) -> Optional[str]:
+    power = raw_device.get("Power")
+    if isinstance(power, Mapping) and "GOLDFINGER" in power:
+        return "MLA400"
+    subsystem_vendor_id = _normalize_hex(str(device.get("subsystem_vendor_id", "")))
+    subsystem_device_id = _normalize_hex(str(device.get("subsystem_device_id", "")))
+    if subsystem_vendor_id in {"402", "0402"} and subsystem_device_id == "108b":
+        return "MLA400"
+    if subsystem_vendor_id in {"401", "0401"} and subsystem_device_id == "1093":
+        return "MLA100"
+    return None
 
 
 def _get_str(value: object) -> Optional[str]:

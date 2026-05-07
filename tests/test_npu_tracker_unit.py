@@ -8,6 +8,7 @@ import pytest
 
 from mblt_tracker.device_tracker_npu import (
     NPUDeviceTracker,
+    _parse_mobilint_status_query_metric_samples,
     _parse_mobilint_status_query_metrics,
     _parse_mobilint_status_static_info,
 )
@@ -84,12 +85,104 @@ Connected NPUs                : 1
     Processes
 """
 
+MLA400_STATUS_QUERY_OUTPUT = """Timestamp                     : 2026-05-07 15:29:48
+Driver Version (Aries)        : 1.12.0 (Rev: 1)
+Driver Version (Regulus)      : N/A
+Connected NPUs                : 4
+/dev/aries0
+    Product                   : Aries
+    Firmware
+        Version               : 1.2.5 (Rev: 0)
+        CRC                   : 0xCCCC0005
+    Temperature               : 45 C
+    Power
+        Total                 : 51.55 W
+        NPU                   : 4.32 W
+        DDR                   : 0.00 W
+        PMIC                  : 0.00 W
+        GOLDFINGER            : 27.79 W
+    Memory
+        Usage                 : 14363 MB
+        Total                 : 16384 MB
+    Utilization
+        Total                 : 0.00 %
+    PCI Express
+        Vendor ID             : 0x209F
+        Device ID             : 0x0
+        Sub Vendor ID         : 0x402
+        Sub Device ID         : 0x108B
+/dev/aries1
+    Product                   : Aries
+    Firmware
+        Version               : 1.2.5 (Rev: 0)
+    Temperature               : 46 C
+    Power
+        Total                 : 0.00 W
+        NPU                   : 4.58 W
+        DDR                   : 0.00 W
+        PMIC                  : 0.00 W
+        GOLDFINGER            : 0.00 W
+    Memory
+        Usage                 : 14299 MB
+        Total                 : 16384 MB
+    Utilization
+        Total                 : 0.00 %
+    PCI Express
+        Vendor ID             : 0x209F
+        Device ID             : 0x0
+        Sub Vendor ID         : 0x402
+        Sub Device ID         : 0x108B
+/dev/aries2
+    Product                   : Aries
+    Firmware
+        Version               : 1.2.5 (Rev: 0)
+    Temperature               : 48 C
+    Power
+        Total                 : 0.00 W
+        NPU                   : 4.41 W
+        DDR                   : 0.00 W
+        PMIC                  : 0.00 W
+        GOLDFINGER            : 0.00 W
+    Memory
+        Usage                 : 12375 MB
+        Total                 : 16384 MB
+    Utilization
+        Total                 : 0.00 %
+    PCI Express
+        Vendor ID             : 0x209F
+        Device ID             : 0x0
+        Sub Vendor ID         : 0x402
+        Sub Device ID         : 0x108B
+/dev/aries3
+    Product                   : Aries
+    Firmware
+        Version               : 1.2.5 (Rev: 0)
+    Temperature               : 46 C
+    Power
+        Total                 : 0.00 W
+        NPU                   : 4.50 W
+        DDR                   : 0.00 W
+        PMIC                  : 0.00 W
+        GOLDFINGER            : 0.00 W
+    Memory
+        Usage                 : 10756 MB
+        Total                 : 16384 MB
+    Utilization
+        Total                 : 0.00 %
+    PCI Express
+        Vendor ID             : 0x209F
+        Device ID             : 0x0
+        Sub Vendor ID         : 0x402
+        Sub Device ID         : 0x108B
+"""
+
 
 def _make_tracker() -> NPUDeviceTracker:
     tracker = object.__new__(NPUDeviceTracker)
     tracker._npu_power_glance = []
     tracker._ddr_power_glance = []
     tracker._pmic_power_glance = []
+    tracker._goldfinger_power_glance = []
     tracker._total_power_glance = []
     tracker._npu_util_glance = []
     tracker._npu_mem_used_mb_glance = []
@@ -100,10 +193,14 @@ def _make_tracker() -> NPUDeviceTracker:
     tracker._npu_power_trace = []
     tracker._ddr_power_trace = []
     tracker._pmic_power_trace = []
+    tracker._goldfinger_power_trace = []
     tracker._util_trace = []
     tracker._mem_used_trace = []
     tracker._mem_used_pct_trace = []
     tracker._temp_trace = []
+    tracker._npu_metric_glance = {}
+    tracker._npu_memory_total_mb = {}
+    tracker._npu_card_model = {}
     return tracker
 
 
@@ -184,6 +281,53 @@ def test_parse_mobilint_status_query_metrics() -> None:
     metrics = _parse_mobilint_status_query_metrics(STATUS_QUERY_OUTPUT)
 
     assert metrics == (3.90, 12.85, 3.92, 3.92, 0.0, 0.0, 16384.0, 0.0, 39.0)
+
+
+def test_parse_mobilint_status_query_metric_samples_classifies_mla100() -> None:
+    samples = _parse_mobilint_status_query_metric_samples(STATUS_QUERY_OUTPUT)
+
+    assert samples is not None
+    assert len(samples) == 1
+    assert samples[0]["card_model"] == "MLA100"
+    assert samples[0]["card_id"] == 0
+    assert samples[0]["goldfinger_power_w"] is None
+
+
+def test_parse_mobilint_status_query_metric_samples_groups_mla400() -> None:
+    samples = _parse_mobilint_status_query_metric_samples(MLA400_STATUS_QUERY_OUTPUT)
+
+    assert samples is not None
+    assert len(samples) == 1
+    sample = samples[0]
+    assert sample["card_model"] == "MLA400"
+    assert sample["chip_count"] == 4
+    assert sample["total_power_w"] == pytest.approx(51.55)
+    assert sample["npu_power_w"] == pytest.approx(17.81)
+    assert sample["goldfinger_power_w"] == pytest.approx(27.79)
+    assert sample["npu_mem_used_mb"] == pytest.approx(51793.0)
+    assert sample["npu_mem_total_mb"] == pytest.approx(65536.0)
+
+
+def test_npu_sampling_records_mla400_goldfinger_and_per_card_stats(monkeypatch) -> None:
+    tracker = _make_tracker()
+    tracker._npu_id = None
+    monkeypatch.setattr(
+        tracker,
+        "_fetch_metric_samples",
+        lambda: _parse_mobilint_status_query_metric_samples(MLA400_STATUS_QUERY_OUTPUT),
+    )
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.time.time", lambda: 789.0)
+
+    tracker._func_for_sched()
+
+    assert tracker.get_trace() == [(789.0, 51.55)]
+    assert tracker.get_npu_power_trace() == [(789.0, pytest.approx(17.81))]
+    assert tracker.get_goldfinger_power_trace() == [(789.0, 27.79)]
+    metrics = tracker.get_metric()
+    assert metrics["avg_goldfinger_power_w"] == 27.79
+    assert metrics["total_memory_mb"] == 65536.0
+    assert metrics["npu"][0]["card_model"] == "MLA400"
+    assert metrics["npu"][0]["avg_power_w"] == 51.55
 
 
 def test_npu_sampling_records_ddr_and_pmic_power_traces(monkeypatch) -> None:
@@ -386,6 +530,8 @@ def test_parse_mobilint_status_static_info_from_query_output() -> None:
             "device_id": "0x0",
             "subsystem_vendor_id": "0x401",
             "subsystem_device_id": "0x1093",
+            "card_model": "MLA100",
+            "card_id": 0,
             "link_generation": "4",
             "lane_width": "8",
             "revision": "0x2",

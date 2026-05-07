@@ -8,7 +8,7 @@
 </a>
 </p>
 <p>
-    <b>A lightweight Python library and CLI for tracking dynamic hardware metrics and collecting static system metadata across CPU, GPU, and NPU.</b>
+    <b>A lightweight Python library and CLI for tracking dynamic hardware metrics and collecting static system metadata across CPU, DRAM, GPU, and NPU.</b>
 </p>
 </div>
 <!-- markdownlint-enable MD033 -->
@@ -19,7 +19,7 @@
 
 ### ✨ Key Features
 
-- **Multi-Backend Support**: Unified interface for Intel CPU, NVIDIA GPU, and Mobilint NPU.
+- **Multi-Backend Support**: Unified interface for Intel CPU/DRAM, NVIDIA GPU, and Mobilint NPU.
 - **Background Tracking**: Uses a background scheduler to poll metrics without blocking your main execution.
 - **Comprehensive Metrics**: Capture Power (Watts), Utilization (%), Memory Usage (MB/%), and Temperature (C).
 - **Statistical Summaries**: Automatically calculates averages, peaks (max), and p99 values.
@@ -56,7 +56,7 @@ pip install -e .
 The typical workflow involves initializing a tracker, starting it before your target workload, and stopping it after.
 
 ```python
-from mblt_tracker import CPUDeviceTracker # or GPUDeviceTracker, NPUDeviceTracker
+from mblt_tracker import CPUDeviceTracker # or DRAMDeviceTracker, GPUDeviceTracker, NPUDeviceTracker
 
 # 1. Initialize with a polling interval (seconds)
 tracker = CPUDeviceTracker(interval=0.1)
@@ -457,14 +457,14 @@ $ mblt-tracker collect
 
 ## Metrics Coverage
 
-| Metric | Intel CPU | NVIDIA GPU | Mobilint NPU |
-| :--- | :---: | :---: | :---: |
-| **Power (W)** | ✅ (RAPL) | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Utilization (%)** | ✅ (`psutil`) | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Memory (MB/%)** | ✅ (`psutil`) | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Temperature (C)** | ✅ (`psutil`) | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Static Info** | ✅ Host/OS/DRAM | ✅ NVML + PCIe | ✅ PCIe + `mobilint-cli` |
-| **Per-Device Stats** | ✅ (Sockets) | ✅ (GPU Indices) | ❌ (Global/Total) |
+| Metric | Intel CPU | Host DRAM | NVIDIA GPU | Mobilint NPU |
+| :--- | :---: | :---: | :---: | :---: |
+| **Power (W)** | ✅ (RAPL) | ✅ (RAPL DRAM) | ✅ (NVML) | ✅ (`mobilint-cli`) |
+| **Utilization (%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
+| **Memory (MB/%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
+| **Temperature (C)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
+| **Static Info** | ✅ Host/OS/DRAM | ✅ Host/OS/DRAM | ✅ NVML + PCIe | ✅ PCIe + `mobilint-cli` |
+| **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (Logical NPU Cards) |
 
 ---
 
@@ -495,15 +495,29 @@ Uses **NVML** (via `nvidia-ml-py`) for high-fidelity hardware monitoring.
 - **Temperature**: Reads on-die GPU temperature through NVML.
 - **Static Info**: `GPUDeviceTracker.get_static_info()` reports the detected GPU count, tracked device names, NVIDIA driver version, and the raw NVML CUDA driver version. The `mblt-tracker collect` CLI provides richer NVML-discovered GPU metadata enriched with PCIe device/link information when available.
 
+### Host DRAM
+
+Uses the **Intel RAPL DRAM domain** through `pyRAPL` for host DRAM power measurements.
+
+- **Platform/Hardware**: Requires a host that exposes RAPL DRAM energy counters.
+- **Permission**: Requires read access to Intel RAPL sysfs, similar to CPU power tracking.
+- **Features**: Tracks all detected CPU socket DRAM domains by default, or specific socket IDs with `DRAMDeviceTracker(socket_id=0)` / `DRAMDeviceTracker(socket_id=[0, 1])`.
+- **Metrics**: Reports total host DRAM power through standard keys (`avg_power_w`, `p99_power_w`, `max_power_w`) and DRAM-specific aliases (`avg_dram_power_w`, `p99_dram_power_w`, `max_dram_power_w`). Per-socket statistics are returned under `metrics["dram"]`.
+- **Trace**: `DRAMDeviceTracker.get_trace()` returns total host DRAM power as `list[(timestamp, power_w)]`.
+- **Static Info**: `DRAMDeviceTracker.get_static_info()` returns the same best-effort host CPU, DRAM DIMM, and OS metadata as host static collection.
+
 ### Mobilint NPU
 
-Polls the `mobilint-cli status` command.
+Polls the `mobilint-cli status -q` command, with a legacy JSON fallback for older environments.
 
 - **Platform**: Currently supports **Linux only**.
 - **Requirement**: Ensure [Mobilint Utility Tool](https://docs.mobilint.com/v1.0/en/installing_utility.html) is installed and `mobilint-cli` is in your PATH.
-- **NPU Power**: Distinguishes between NPU-specific power and total system power.
+- **Device Selection**: Tracks all logical NPU cards by default, or selected logical card IDs with `NPUDeviceTracker(npu_id=0)` / `NPUDeviceTracker(npu_id=[0, 1])`.
+- **MLA100 vs MLA400**: `status -q` output is classified best-effort. Devices with a `Power.GOLDFINGER` rail are treated as MLA400 and grouped as one logical card. MLA100 devices remain one logical card per PCIe card. PCIe subsystem IDs are also used as a fallback (`0x401/0x1093` for MLA100, `0x402/0x108B` for MLA400 observed outputs).
+- **NPU Power**: Distinguishes between NPU core power and total card/system power. For MLA400, `Power.Total` is reported by the first chip, while NPU core, memory, and utilization are aggregated across the grouped Aries chips.
+- **DDR/PMIC/GOLDFINGER Power**: Parses optional NPU board DDR, PMIC, and MLA400 GOLDFINGER power rails when present.
 - **Temperature**: Parses NPU temperature from `mobilint-cli status` output when available.
-- **Static Info**: Reports Mobilint PCIe device information and parses driver, firmware, product, and board metadata from `mobilint-cli status` when available.
+- **Static Info**: Reports Mobilint PCIe device information and parses driver, firmware, product, board, `card_model`, and `card_id` metadata from `mobilint-cli status` when available.
 
 ---
 
@@ -538,7 +552,8 @@ Tracker-specific fields may also be present:
 
 - **CPU**: `cpu` contains per-socket statistics keyed by socket ID.
 - **GPU**: `gpu` contains per-GPU statistics keyed by GPU index. GPU-specific summary keys include `avg_gpu_util_pct`, `p99_gpu_util_pct`, `max_gpu_util_pct`, `avg_mem_util_pct`, and `p99_mem_util_pct`.
-- **NPU**: NPU-specific power keys include `avg_npu_power_w`, `p99_npu_power_w`, `max_npu_power_w`, `avg_total_power_w`, `p99_total_power_w`, and `max_total_power_w`. `avg_power_w` is mapped to total power for cross-device consistency.
+- **DRAM**: DRAM-specific power keys include `avg_dram_power_w`, `p99_dram_power_w`, and `max_dram_power_w`. `dram` contains per-socket statistics keyed by socket ID.
+- **NPU**: NPU-specific power keys include `avg_npu_power_w`, `p99_npu_power_w`, `max_npu_power_w`, `avg_ddr_power_w`, `p99_ddr_power_w`, `max_ddr_power_w`, `avg_pmic_power_w`, `p99_pmic_power_w`, `max_pmic_power_w`, `avg_goldfinger_power_w`, `p99_goldfinger_power_w`, `max_goldfinger_power_w`, `avg_total_power_w`, `p99_total_power_w`, and `max_total_power_w`. `avg_power_w` is mapped to total power for cross-device consistency. `npu` contains per logical card statistics keyed by card ID.
 
 ### Time-Series Trace APIs
 
@@ -548,6 +563,15 @@ All trackers expose trace APIs for post-processing and plotting:
 tracker.get_trace()       # Power trace: list[(timestamp, power_w)]
 tracker.get_util_trace()  # Utilization trace: list[(timestamp, utilization_pct)]
 tracker.get_temp_trace()  # Temperature trace: list[(timestamp, temperature_c)]
+```
+
+NPU trackers additionally expose rail-specific power traces:
+
+```python
+tracker.get_npu_power_trace()         # NPU core power
+tracker.get_ddr_power_trace()         # On-board NPU DDR power, when available
+tracker.get_pmic_power_trace()        # NPU PMIC power, when available
+tracker.get_goldfinger_power_trace()  # MLA400 GOLDFINGER input power, when available
 ```
 
 ---
@@ -575,6 +599,8 @@ Typical fields include:
 - `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names
 - `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices enriched with PCIe vendor/device IDs and link information where available
 - `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, link information, and firmware metadata where available
+- `hardware.npus[].card_model`: best-effort Mobilint card model classification such as `MLA100` or `MLA400` when `mobilint-cli status -q` exposes enough information
+- `hardware.npus[].card_id`: logical NPU card ID used by `NPUDeviceTracker(npu_id=...)`; MLA400 Aries chips share the same card ID
 - `inference.gpu`: NVIDIA driver and CUDA driver versions. The CLI normalizes the CUDA driver version as a string such as `"13.0"`; `GPUDeviceTracker.get_static_info()` returns the raw NVML CUDA driver integer.
 - `hardware.npus[].firmware`: per-NPU firmware metadata where available. Linux currently maps `mobilint-cli status` firmware rows by device order.
 - `inference.npu_driver_version`: host Mobilint NPU driver version when available. Linux may also include `inference.driver` with Aries/Regulus driver metadata parsed from `mobilint-cli status`.
