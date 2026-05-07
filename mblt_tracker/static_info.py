@@ -917,6 +917,13 @@ def get_pcie_static_info(
     hardware_info: dict[str, object] = {}
     if include_all_devices:
         hardware_info["pcie_devices"] = devices
+    gpus = _find_all_gpu_devices(devices)
+    if gpus:
+        gpu_device_indices = _get_gpu_device_indices(devices)
+        hardware_info["gpus"] = [
+            _format_pcie_device(device, gpu_device_indices.get(id(device), dev_no))
+            for dev_no, device in enumerate(gpus)
+        ]
     npus = _find_all_npu_devices(devices, vendor_id, device_id, class_filter)
     inference_info: dict[str, object] = {}
     if npus:
@@ -943,6 +950,16 @@ def _get_npu_device_indices(devices: list[dict[str, object]]) -> dict[int, int]:
         id(device): index
         for index, device in enumerate(
             device for device in devices if _is_likely_npu_device(device)
+        )
+    }
+
+
+def _get_gpu_device_indices(devices: list[dict[str, object]]) -> dict[int, int]:
+    """Return stable unfiltered GPU indices keyed by object identity."""
+    return {
+        id(device): index
+        for index, device in enumerate(
+            device for device in devices if _is_likely_gpu_device(device)
         )
     }
 

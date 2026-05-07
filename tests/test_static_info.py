@@ -855,7 +855,7 @@ def test_get_pcie_static_info_can_include_all_devices(monkeypatch, tmp_path) -> 
     assert len(cast(list[dict[str, object]], hardware["pcie_devices"])) == 2
 
 
-def test_get_pcie_static_info_keeps_raw_gpu_only_when_all_devices_requested(
+def test_get_pcie_static_info_includes_gpu_and_raw_devices_when_all_requested(
     monkeypatch, tmp_path
 ) -> None:
     sysfs = tmp_path / "pci"
@@ -889,11 +889,21 @@ def test_get_pcie_static_info_keeps_raw_gpu_only_when_all_devices_requested(
         "0000_02_00.0",
         "0000_03_00.0",
     ]
-    assert "gpus" not in hardware
+    gpus = cast(list[dict[str, object]], hardware["gpus"])
+    assert gpus == [
+        {
+            "dev_no": 0,
+            "bus_address": "0000_01_00.0",
+            "vendor_id": "0x10de",
+            "device_id": "0x2684",
+            "class": "0x030000",
+            "manufacturer": "NVIDIA",
+        }
+    ]
     assert "npus" not in hardware
 
 
-def test_get_pcie_static_info_omits_raw_devices_by_default(
+def test_get_pcie_static_info_includes_gpu_but_omits_raw_devices_by_default(
     monkeypatch, tmp_path
 ) -> None:
     sysfs = tmp_path / "pci"
@@ -913,7 +923,52 @@ def test_get_pcie_static_info_omits_raw_devices_by_default(
 
     info = get_pcie_static_info()
 
-    assert info == {}
+    hardware = cast(dict[str, object], info["hardware"])
+    assert "pcie_devices" not in hardware
+    assert hardware["gpus"] == [
+        {
+            "dev_no": 0,
+            "bus_address": "0000_01_00.0",
+            "vendor_id": "0x10de",
+            "device_id": "0x2684",
+            "class": "0x030000",
+            "manufacturer": "NVIDIA",
+        }
+    ]
+
+
+def test_get_pcie_static_info_includes_amd_gpu_without_nvml() -> None:
+    info = get_pcie_static_info(
+        devices=[
+            {
+                "bus_address": "0000:05:00.0",
+                "vendor_id": "0x1002",
+                "device_id": "0x744c",
+                "class": "0x030000",
+                "name": "Navi 31 [Radeon RX 7900 XTX]",
+                "manufacturer": "AMD",
+                "current_link_speed": "16.0 GT/s PCIe",
+                "current_link_width": "16",
+            }
+        ]
+    )
+
+    hardware = cast(dict[str, object], info["hardware"])
+    assert hardware["gpus"] == [
+        {
+            "dev_no": 0,
+            "bus_address": "0000:05:00.0",
+            "vendor_id": "0x1002",
+            "device_id": "0x744c",
+            "class": "0x030000",
+            "name": "Navi 31 [Radeon RX 7900 XTX]",
+            "manufacturer": "AMD",
+            "current_link_speed": "16.0 GT/s PCIe",
+            "current_link_width": "16",
+            "link_generation": "Gen4",
+            "lane_width": "x16",
+        }
+    ]
 
 
 def test_parse_windows_pci_id_reads_class_from_auxiliary_ids() -> None:
