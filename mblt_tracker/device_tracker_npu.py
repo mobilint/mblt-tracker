@@ -16,6 +16,7 @@ from .static_info import (
     get_all_pcie_devices,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
+    parse_mobilint_status_quiet_output,
     parse_mobilint_status_static_info,
     run_command,
 )
@@ -30,7 +31,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
         Args:
             interval (float): The interval in seconds at which the NPU should be polled.
             status_cmd (Optional[str]): Custom command to fetch NPU status.
-                Defaults to using the internal `device_tracker_npu.sh` script.
+                Defaults to `mobilint-cli status -q`.
 
         Raises:
             RuntimeError: If the operating system is not Linux.
@@ -38,11 +39,10 @@ class NPUDeviceTracker(BaseDeviceTracker):
         super().__init__(interval=interval)
         if platform.system() != "Linux":
             raise RuntimeError("NPUDeviceTracker currently supports Linux only")
-        script_path = os.path.join(os.path.dirname(__file__), "device_tracker_npu.sh")
         self._status_cmd = (
             status_cmd
             if status_cmd is not None
-            else f"bash {script_path} --sample-once --json"
+            else "mobilint-cli status -q"
         )
         self._job_id = "npu_device_track"
         self._npu_power_glance: list[float] = []
@@ -71,7 +71,11 @@ class NPUDeviceTracker(BaseDeviceTracker):
             Optional[float],
         ]
     ]:
-        """Execute the status command and parse the JSON output.
+        """Execute the status command and parse NPU metric output.
+
+        The default path uses ``mobilint-cli status -q`` and parses the
+        indentation-based quiet format directly. For backward compatibility,
+        custom commands that return the legacy JSON payload are still accepted.
 
         Returns:
             Optional[tuple]: A tuple containing (npu_power_w, total_power_w,
@@ -91,8 +95,13 @@ class NPUDeviceTracker(BaseDeviceTracker):
         if result.returncode != 0 or not result.stdout:
             return None
 
+        output = result.stdout.strip()
+        metrics = _parse_mobilint_status_quiet_metrics(output)
+        if metrics is not None:
+            return metrics
+
         try:
-            payload = json.loads(result.stdout.strip())
+            payload = json.loads(output)
         except Exception:
             return None
 
@@ -325,7 +334,9 @@ class NPUDeviceTracker(BaseDeviceTracker):
                 ),
             )
         else:
-            status_output = run_command(["mobilint-cli", "status"])
+            status_output = run_command(["mobilint-cli", "status", "-q"])
+            if not status_output:
+                status_output = run_command(["mobilint-cli", "status"])
             if status_output:
                 status_info = _parse_mobilint_status_static_info(status_output)
                 if has_pcie_filter:
@@ -364,3 +375,66 @@ class NPUDeviceTracker(BaseDeviceTracker):
 def _parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
     """Parse static NPU fields from ``mobilint-cli status`` table output."""
     return parse_mobilint_status_static_info(status_output)
+
+
+def _parse_mobilint_status_quiet_metrics(
+    status_output: str,
+) -> Optional[
+    tuple[
+        float,
+        float,
+        Optional[float],
+        Optional[float],
+        Optional[float],
+        Optional[float],
+        Optional[float],
+    ]
+]:
+    parsed = parse_mobilint_status_quiet_output(status_output)
+    devices = parsed.get("devices")
+    if not isinstance(devices, list) or not devices:
+        return None
+    first_device = devices[0]
+    if not isinstance(first_device, dict):
+        return None
+
+    power = first_device.get("Power")
+    if not isinstance(power, dict):
+        return None
+    npu_power_w = _parse_status_number(power.get("NPU"))
+    total_power_w = _parse_status_number(power.get("Total"))
+    if npu_power_w is None or total_power_w is None:
+        return None
+
+    utilization = first_device.get("Utilization")
+    npu_util_pct = None
+    if isinstance(utilization, dict):
+        npu_util_pct = _parse_status_number(utilization.get("Total"))
+
+    memory = first_device.get("Memory")
+    npu_mem_used_mb = None
+    npu_mem_total_mb = None
+    npu_mem_used_pct = None
+    if isinstance(memory, dict):
+        npu_mem_used_mb = _parse_status_number(memory.get("Usage"))
+        npu_mem_total_mb = _parse_status_number(memory.get("Total"))
+        if npu_mem_used_mb is not None and npu_mem_total_mb not in (None, 0.0):
+            npu_mem_used_pct = (npu_mem_used_mb / npu_mem_total_mb) * 100.0
+
+    npu_temp_c = _parse_status_number(first_device.get("Temperature"))
+    return (
+        npu_power_w,
+        total_power_w,
+        npu_util_pct,
+        npu_mem_used_mb,
+        npu_mem_total_mb,
+        npu_mem_used_pct,
+        npu_temp_c,
+    )
+
+
+def _parse_status_number(value: object) -> Optional[float]:
+    if not isinstance(value, str):
+        return None
+    match = re.search(r"[-+]?\d+(?:\.\d+)?", value)
+    return float(match.group(0)) if match is not None else None

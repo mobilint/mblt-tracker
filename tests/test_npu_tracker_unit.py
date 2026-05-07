@@ -6,9 +6,12 @@ import subprocess
 
 import pytest
 
-from mblt_tracker.device_tracker_npu import NPUDeviceTracker
-from mblt_tracker.device_tracker_npu import _parse_mobilint_status_static_info
-
+from mblt_tracker.device_tracker_npu import (
+    NPUDeviceTracker,
+    _parse_mobilint_status_quiet_metrics,
+    _parse_mobilint_status_static_info,
+)
+from mblt_tracker.static_info import parse_mobilint_status_quiet_output
 
 STATUS_OUTPUT = """2026-04-15 16:06:59
 +------------------------------------------------------------------------------------------+
@@ -20,6 +23,65 @@ STATUS_OUTPUT = """2026-04-15 16:06:59
 |   0  Aries(aries0)            |   2.11W   7.87W |   50MHz /  150MHz |      0MB / 16384MB |
 |   0  49 C               1.2.4 |   0.17A   0.65A |                   |              0.00% |
 +-------------------------------+-----------------+-------------------+--------------------+
+"""
+
+STATUS_QUIET_OUTPUT = """Timestamp                     : 2026-05-07 04:10:46
+Driver Version (Aries)        : 1.12.0 (Rev: 1)
+Driver Version (Regulus)      : N/A
+Connected NPUs                : 1
+/dev/aries0
+    Product                   : Aries
+    Firmware
+        Version               : 1.1 (Rev: 0)
+        CRC                   : 0xFB9A5980
+    Temperature               : 39 C
+    Signal Type               : Interrupt
+    Clock
+        NPU                   : 1250 MHz
+        Bus                   : 1000 MHz
+    Power
+        Total                 : 12.85 W
+        NPU                   : 3.90 W
+        DDR                   : 3.92 W
+        PMIC                  : 3.92 W
+    Current
+        Total                 : 1.05 A
+        NPU                   : 0.32 A
+        DDR                   : 0.32 A
+        PMIC                  : 0.32 A
+    Voltage
+        Total                 : 12.20 V
+        NPU                   : 12.19 V
+        DDR                   : 12.19 V
+        PMIC                  : 12.19 V
+    Memory
+        Usage                 : 0 MB
+        Total                 : 16384 MB
+    Utilization
+        Total                 : 0.00 %
+        Cluster0
+            GlobalCore        : 0.00 %
+            Core0             : 0.00 %
+            Core1             : 0.00 %
+            Core2             : 0.00 %
+            Core3             : 0.00 %
+        Cluster1
+            GlobalCore        : 0.00 %
+            Core0             : 0.00 %
+            Core1             : 0.00 %
+            Core2             : 0.00 %
+            Core3             : 0.00 %
+    Fan Duty                  : 34 %
+    PCI Express
+        Vendor ID             : 0x209F
+        Device ID             : 0x0
+        Sub Vendor ID         : 0x401
+        Sub Device ID         : 0x1093
+        PCIe Generation       : 4
+        PCIe Lanes            : 8
+        PCIe Revision         : 0x2
+        PCIe Class Code       : 0x7800002
+    Processes
 """
 
 
@@ -79,6 +141,57 @@ def test_parse_mobilint_status_static_info() -> None:
         "aries_version": "1.12.0",
         "regulus_version": "N/A",
     }
+
+
+def test_parse_mobilint_status_quiet_output_to_nested_dict() -> None:
+    parsed = parse_mobilint_status_quiet_output(STATUS_QUIET_OUTPUT)
+
+    assert parsed["Driver Version (Aries)"] == "1.12.0 (Rev: 1)"
+    assert parsed["Connected NPUs"] == "1"
+    devices = parsed["devices"]
+    assert isinstance(devices, list)
+    device = devices[0]
+    assert device["path"] == "/dev/aries0"
+    assert device["Product"] == "Aries"
+    assert device["Firmware"]["Version"] == "1.1 (Rev: 0)"
+    assert device["Power"]["Total"] == "12.85 W"
+    assert device["Utilization"]["Cluster0"]["Core3"] == "0.00 %"
+
+
+def test_parse_mobilint_status_quiet_metrics() -> None:
+    metrics = _parse_mobilint_status_quiet_metrics(STATUS_QUIET_OUTPUT)
+
+    assert metrics == (3.90, 12.85, 0.0, 0.0, 16384.0, 0.0, 39.0)
+
+
+def test_parse_mobilint_status_static_info_from_quiet_output() -> None:
+    info = _parse_mobilint_status_static_info(STATUS_QUIET_OUTPUT)
+
+    assert info["inference"] == {
+        "npu_driver_version": "1.12.0",
+        "driver": {"aries_version": "1.12.0", "regulus_version": "N/A"},
+    }
+    assert info["hardware"]["npus"] == [
+        {
+            "dev_no": 0,
+            "board_name": "aries0",
+            "product": "Aries",
+            "firmware": {
+                "version": "1.1",
+                "revision": "0",
+                "crc": "0xFB9A5980",
+            },
+            "vendor_id": "0x209F",
+            "device_id": "0x0",
+            "subsystem_vendor_id": "0x401",
+            "subsystem_device_id": "0x1093",
+            "link_generation": "4",
+            "lane_width": "8",
+            "revision": "0x2",
+            "class": "0x7800002",
+            "memory_total_bytes": 17179869184,
+        }
+    ]
 
 
 def test_npu_get_static_info_uses_mobilint_pci_vendor_by_default(monkeypatch) -> None:
