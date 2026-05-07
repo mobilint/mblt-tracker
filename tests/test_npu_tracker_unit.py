@@ -179,7 +179,6 @@ def test_parse_mobilint_status_static_info_from_quiet_output() -> None:
             "firmware": {
                 "version": "1.1",
                 "revision": "0",
-                "crc": "0xFB9A5980",
             },
             "vendor_id": "0x209F",
             "device_id": "0x0",

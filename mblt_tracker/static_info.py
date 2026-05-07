@@ -869,13 +869,10 @@ def _mobilint_quiet_device_to_static_info(
         version_value = _get_str(firmware.get("Version"))
         version = _parse_mobilint_version_value(version_value)
         revision = _parse_mobilint_revision_value(version_value)
-        crc = _get_str(firmware.get("CRC"))
         if version is not None:
             firmware_info["version"] = version
         if revision is not None:
             firmware_info["revision"] = revision
-        if crc is not None:
-            firmware_info["crc"] = crc
         if firmware_info:
             device["firmware"] = firmware_info
 
