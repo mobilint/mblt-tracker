@@ -133,7 +133,6 @@ class HardwareInfo(_HardwareInfoRequired, total=False):
 class _InferenceInfoRequired(TypedDict):
     cpu: CpuPowerPolicy
     cuda: VersionInfo
-    gpu: GpuInferenceInfo
     npu_driver_version: str
     os: OsInfo
     qbcompiler: VersionInfo
