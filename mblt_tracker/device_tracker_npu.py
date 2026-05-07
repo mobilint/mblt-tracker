@@ -13,6 +13,7 @@ from .device_tracker import BaseDeviceTracker
 from .static_info import (
     _deep_merge,
     _filter_npu_metadata_to_selected_devices,
+    _mla400_static_card_id,
     get_all_pcie_devices,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
@@ -598,20 +599,16 @@ def _group_query_metric_samples(samples: list[_MetricSample]) -> list[_MetricSam
         else:
             grouped_samples.append(sample)
 
-    for _group_id, group_samples in sorted(mla400_groups.items()):
-        grouped_samples.append(_aggregate_mla400_samples(group_samples))
+    for group_id, group_samples in sorted(mla400_groups.items()):
+        grouped_samples.append(_aggregate_mla400_samples(group_samples, group_id))
 
     grouped_samples.sort(key=_sample_sort_key)
-    for card_id, sample in enumerate(grouped_samples):
-        sample["card_id"] = card_id
     return grouped_samples
 
 
 def _mla400_group_id(sample: _MetricSample, fallback_group_id: int) -> int:
     dev_no = _sample_int(sample, "dev_no")
-    if dev_no is None:
-        return fallback_group_id
-    return dev_no // 4
+    return _mla400_static_card_id(dev_no, fallback_group_id * 4)
 
 
 def _sample_sort_key(sample: _MetricSample) -> tuple[int, int]:
@@ -678,13 +675,15 @@ def _query_device_to_metric_sample(device: dict[str, object]) -> Optional[_Metri
     return sample
 
 
-def _aggregate_mla400_samples(samples: list[_MetricSample]) -> _MetricSample:
+def _aggregate_mla400_samples(
+    samples: list[_MetricSample], card_id: int
+) -> _MetricSample:
     total_power_values = [_sample_float(sample, "total_power_w") for sample in samples]
     non_zero_total_power = [value for value in total_power_values if value is not None and value > 0]
     npu_mem_used_mb = _sum_optional_sample_key(samples, "npu_mem_used_mb")
     npu_mem_total_mb = _sum_optional_sample_key(samples, "npu_mem_total_mb")
     return {
-        "card_id": 0,
+        "card_id": card_id,
         "card_model": "MLA400",
         "chip_count": len(samples),
         "npu_power_w": _sum_sample_key(samples, "npu_power_w"),

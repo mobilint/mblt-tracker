@@ -1350,3 +1350,32 @@ Connected NPUs                : 8
     assert [npu["dev_no"] for npu in npus] == list(range(8))
     assert [npu["card_model"] for npu in npus] == ["MLA400"] * 8
     assert [npu["card_id"] for npu in npus] == [0, 0, 0, 0, 1, 1, 1, 1]
+
+
+def test_parse_mobilint_status_query_static_info_keeps_mla400_offset_card_id() -> None:
+    def mla400_device(dev_no: int) -> str:
+        return f"""/dev/aries{dev_no}
+    Product                   : Aries
+    Power
+        Total                 : 0.00 W
+        NPU                   : 4.00 W
+        GOLDFINGER            : 0.00 W
+    PCI Express
+        Vendor ID             : 0x209F
+        Device ID             : 0x0
+        Sub Vendor ID         : 0x402
+        Sub Device ID         : 0x108B
+"""
+
+    status_output = """Timestamp                     : 2026-05-07 15:29:48
+Driver Version (Aries)        : 1.12.0 (Rev: 1)
+Driver Version (Regulus)      : N/A
+Connected NPUs                : 4
+""" + "".join(mla400_device(dev_no) for dev_no in range(4, 8))
+
+    info = parse_mobilint_status_static_info(status_output)
+
+    hardware = cast(dict[str, object], info["hardware"])
+    npus = cast(list[dict[str, object]], hardware["npus"])
+    assert [npu["dev_no"] for npu in npus] == [4, 5, 6, 7]
+    assert [npu["card_id"] for npu in npus] == [1, 1, 1, 1]

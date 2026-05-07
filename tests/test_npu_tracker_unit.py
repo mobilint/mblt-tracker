@@ -345,6 +345,17 @@ def test_parse_mobilint_status_query_metric_samples_groups_mla400() -> None:
     assert sample["npu_mem_total_mb"] == pytest.approx(65536.0)
 
 
+def test_parse_mobilint_status_query_metric_samples_keeps_mla400_offset_card_id() -> None:
+    samples = _parse_mobilint_status_query_metric_samples(
+        _renumber_mla400_status_output(device_offset=4, power_offset=0.0)
+    )
+
+    assert samples is not None
+    assert len(samples) == 1
+    assert samples[0]["card_model"] == "MLA400"
+    assert samples[0]["card_id"] == 1
+
+
 def test_parse_mobilint_status_query_metric_samples_keeps_mixed_mla100_separate() -> None:
     status_output = MLA400_STATUS_QUERY_OUTPUT + MLA100_STATUS_QUERY_DEVICE_4
     samples = _parse_mobilint_status_query_metric_samples(status_output)
@@ -357,7 +368,7 @@ def test_parse_mobilint_status_query_metric_samples_keeps_mixed_mla100_separate(
     assert mla400_sample["chip_count"] == 4
     assert mla400_sample["total_power_w"] == pytest.approx(51.55)
     assert mla400_sample["npu_power_w"] == pytest.approx(17.81)
-    assert mla100_sample["card_id"] == 1
+    assert mla100_sample["card_id"] == 4
     assert mla100_sample["card_model"] == "MLA100"
     assert mla100_sample["dev_no"] == 4
     assert mla100_sample["total_power_w"] == pytest.approx(12.85)
