@@ -17,7 +17,6 @@ from ._types import (
     STATIC_INFO_CHILD_SCHEMAS,
     CollectOutput,
     CpuPowerPolicy,
-    DimmInfo,
 )
 
 
@@ -72,26 +71,7 @@ def get_host_static_info(
         cpu_info["vendor"] = vendor
 
     if platform.system() == "Windows":
-        dimms = _read_dram_dimms_windows()
-    elif platform.system() == "Linux":
-        dimms = _read_dram_dimms_linux(
-            sudo_password=sudo_password,
-            sudo_password_provider=sudo_password_provider,
-        )
-    else:
-        dimms = []
-    if dimms:
-        dram = info["hardware"]["dram"]
-        dram["dimms"] = cast(list[DimmInfo], dimms)
-        theoretical_bandwidth_gbps = _calculate_theoretical_bandwidth_gbps(dimms)
-        if theoretical_bandwidth_gbps is not None:
-            dram["theoretical_bandwidth_gbps"] = theoretical_bandwidth_gbps
-    elif platform.system() == "Linux":
-        info["hardware"]["dram"]["dimms_collection_note"] = (
-            "Physical DIMM metadata requires dmidecode access. Run "
-            "`mblt-tracker collect` in an interactive terminal and enter the "
-            "sudo password, or install/configure dmidecode."
-        )
+        info["hardware"]["dram"].update(_read_dram_summary_windows())
 
     if platform.system() == "Linux":
         os_release = _read_os_release()
@@ -151,6 +131,7 @@ def _get_cuda_version() -> Optional[str]:
 
 def get_nvml_gpu_static_info(
     pcie_devices: Optional[list[dict[str, object]]] = None,
+    include_private_identifiers: bool = False,
 ) -> dict[str, object]:
     """Collect NVIDIA GPU static information through NVML.
 
@@ -197,7 +178,13 @@ def get_nvml_gpu_static_info(
             gpu_entry.update(nvml_static_metadata)
             if bus_address is not None:
                 gpu_entry["bus_address"] = bus_address
-            gpus.append(_format_pcie_device(gpu_entry, device_index))
+            gpus.append(
+                _format_pcie_device(
+                    gpu_entry,
+                    device_index,
+                    include_private_identifiers=include_private_identifiers,
+                )
+            )
     except Exception:
         return {}
     finally:
@@ -583,8 +570,8 @@ def _parse_windows_power_setting_ac_value(output: str) -> Optional[int]:
         return None
 
 
-def _read_dram_dimms_windows() -> list[dict[str, object]]:
-    """Collect physical memory module information from Windows CIM."""
+def _read_dram_summary_windows() -> dict[str, object]:
+    """Collect privacy-safe DRAM aggregate information from Windows CIM."""
     output = run_command(
         [
             "powershell",
@@ -593,73 +580,80 @@ def _read_dram_dimms_windows() -> list[dict[str, object]]:
             "Bypass",
             "-Command",
             "Get-CimInstance Win32_PhysicalMemory | "
-            "Select-Object Manufacturer,PartNumber,SerialNumber,Capacity,Speed,"
+            "Select-Object Capacity,Speed,"
             "ConfiguredClockSpeed,DataWidth,TotalWidth,SMBIOSMemoryType | "
             "ConvertTo-Json -Depth 3",
         ]
     )
     if output is None:
-        return []
+        return {}
 
     try:
         parsed = json.loads(output)
     except json.JSONDecodeError:
-        return []
+        return {}
 
     if isinstance(parsed, dict):
         entries = [parsed]
     elif isinstance(parsed, list):
         entries = [entry for entry in parsed if isinstance(entry, dict)]
     else:
-        return []
+        return {}
 
-    dimms = []
+    modules = []
     for entry in entries:
-        dimm = {
-            "manufacturer": _clean_dram_string(entry.get("Manufacturer")),
-            "part_number": _clean_dram_string(entry.get("PartNumber")),
-            "serial_number": _clean_dram_string(entry.get("SerialNumber")),
+        module = {
             "capacity_bytes": _to_int(entry.get("Capacity")),
             "speed_mhz": _to_int(entry.get("Speed")),
             "configured_speed_mhz": _to_int(entry.get("ConfiguredClockSpeed")),
             "data_width_bits": _to_int(entry.get("DataWidth")),
             "total_width_bits": _to_int(entry.get("TotalWidth")),
-            "type": _windows_memory_type_to_text(entry.get("SMBIOSMemoryType")),
+            "ram_type": _windows_memory_type_to_text(entry.get("SMBIOSMemoryType")),
         }
-        cleaned = {key: value for key, value in dimm.items() if value is not None}
+        cleaned = {key: value for key, value in module.items() if value is not None}
         if cleaned:
-            dimms.append(cleaned)
-    return dimms
+            modules.append(cleaned)
+    return _summarize_dram_modules(modules)
 
 
-def _read_dram_dimms_linux(
-    sudo_password: Optional[str] = None,
-    sudo_password_provider: Optional[Callable[[], str]] = None,
-) -> list[dict[str, object]]:
-    """Collect physical memory module information from Linux dmidecode.
+def _summarize_dram_modules(
+    modules: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Collapse safe module-level DRAM performance fields into public aggregates."""
+    summary: dict[str, object] = {}
+    ram_type = _common_str(module.get("ram_type") for module in modules)
+    speed_mhz = _common_int(module.get("speed_mhz") for module in modules)
+    configured_speed_mhz = _common_int(
+        module.get("configured_speed_mhz") for module in modules
+    )
+    theoretical_bandwidth_gbps = _calculate_theoretical_bandwidth_gbps(modules)
+    if ram_type is not None:
+        summary["ram_type"] = ram_type
+    if speed_mhz is not None:
+        summary["speed_mhz"] = speed_mhz
+    if configured_speed_mhz is not None:
+        summary["configured_speed_mhz"] = configured_speed_mhz
+    if theoretical_bandwidth_gbps is not None:
+        summary["theoretical_bandwidth_gbps"] = theoretical_bandwidth_gbps
+    return summary
 
-    ``dmidecode`` normally requires root privileges. Try the direct command
-    first, then the best-effort non-interactive sudo fallback before asking for
-    any interactive password. When a sudo password is supplied, pass it to
-    ``sudo -S`` so callers can collect richer output without requiring users to
-    run the whole CLI through sudo. If all attempts fail, callers add a
-    permission note to the public output.
-    """
-    output = run_command(["dmidecode", "-t", "memory"])
-    if output is None:
-        output = run_command(["sudo", "-n", "dmidecode", "-t", "memory"])
-    if output is None:
-        if sudo_password is None and sudo_password_provider is not None:
-            sudo_password = sudo_password_provider()
-        if sudo_password is not None:
-            output = run_command_with_input(
-                ["sudo", "-S", "-p", "", "dmidecode", "-t", "memory"],
-                input_text=f"{sudo_password}\n",
-                timeout=30,
-            )
-    if output is None:
-        return []
-    return _parse_linux_dmidecode_memory(output)
+
+def _common_int(values: Sequence[object]) -> Optional[int]:
+    ints = [_to_int(value) for value in values]
+    ints = [value for value in ints if value is not None]
+    if not ints:
+        return None
+    first = ints[0]
+    return first if all(value == first for value in ints) else None
+
+
+def _common_str(values: Sequence[object]) -> Optional[str]:
+    strings = [str(value).strip() for value in values if isinstance(value, str)]
+    strings = [value for value in strings if value]
+    if not strings:
+        return None
+    first = strings[0]
+    return first if all(value == first for value in strings) else None
 
 
 def get_linux_npu_driver_firmware_info(
@@ -973,46 +967,6 @@ def _parse_number_from_unit_value(value: Optional[str]) -> Optional[float]:
     return float(match.group(0)) if match is not None else None
 
 
-def _parse_linux_dmidecode_memory(output: str) -> list[dict[str, object]]:
-    dimms = []
-    for section in re.split(r"\nHandle\s+", output):
-        if "Memory Device" not in section:
-            continue
-
-        fields = _parse_dmidecode_section_fields(section)
-        if fields.get("Size") in {None, "No Module Installed"}:
-            continue
-
-        dimm = {
-            "manufacturer": _clean_dram_string(fields.get("Manufacturer")),
-            "part_number": _clean_dram_string(fields.get("Part Number")),
-            "serial_number": _clean_dram_string(fields.get("Serial Number")),
-            "capacity_bytes": _parse_memory_size_to_bytes(fields.get("Size")),
-            "speed_mhz": _parse_memory_speed_to_mhz(fields.get("Speed")),
-            "configured_speed_mhz": _parse_memory_speed_to_mhz(
-                fields.get("Configured Memory Speed")
-            ),
-            "data_width_bits": _parse_memory_width_to_bits(fields.get("Data Width")),
-            "total_width_bits": _parse_memory_width_to_bits(fields.get("Total Width")),
-            "type": _clean_dram_string(fields.get("Type")),
-        }
-        cleaned = {key: value for key, value in dimm.items() if value is not None}
-        if cleaned:
-            dimms.append(cleaned)
-    return dimms
-
-
-def _parse_dmidecode_section_fields(section: str) -> dict[str, str]:
-    fields = {}
-    for line in section.splitlines():
-        if ":" not in line:
-            continue
-        key, value = [part.strip() for part in line.split(":", 1)]
-        if key:
-            fields[key] = value
-    return fields
-
-
 def _calculate_theoretical_bandwidth_gbps(
     dimms: Sequence[Mapping[str, object]],
 ) -> Optional[float]:
@@ -1046,56 +1000,6 @@ def _windows_memory_type_to_text(value: object) -> Optional[str]:
     return memory_types.get(memory_type)
 
 
-def _parse_memory_size_to_bytes(value: Optional[str]) -> Optional[int]:
-    if value is None:
-        return None
-    match = re.search(r"([0-9]+)\s*([KMGT]B)", value, re.IGNORECASE)
-    if match is None:
-        return None
-    amount = int(match.group(1))
-    unit = match.group(2).upper()
-    multipliers = {
-        "KB": 1024,
-        "MB": 1024**2,
-        "GB": 1024**3,
-        "TB": 1024**4,
-    }
-    return amount * multipliers[unit]
-
-
-def _parse_memory_speed_to_mhz(value: Optional[str]) -> Optional[int]:
-    if value is None or value.strip().lower() == "unknown":
-        return None
-    match = re.search(r"([0-9]+)", value)
-    if match is None:
-        return None
-    return int(match.group(1))
-
-
-def _parse_memory_width_to_bits(value: Optional[str]) -> Optional[int]:
-    if value is None or value.strip().lower() == "unknown":
-        return None
-    match = re.search(r"([0-9]+)", value)
-    if match is None:
-        return None
-    return int(match.group(1))
-
-
-def _clean_dram_string(value: object) -> Optional[str]:
-    if not isinstance(value, str):
-        return None
-    value = value.strip()
-    if not value or value.lower() in {
-        "unknown",
-        "not specified",
-        "not provided",
-        "none",
-        "to be filled by o.e.m.",
-    }:
-        return None
-    return value
-
-
 def _to_int(value: object) -> Optional[int]:
     if isinstance(value, bool):
         return None
@@ -1118,6 +1022,7 @@ def get_pcie_static_info(
     class_filter: Optional[str] = None,
     include_all_devices: bool = False,
     devices: Optional[list[dict[str, object]]] = None,
+    include_private_identifiers: bool = False,
 ) -> dict[str, object]:
     """Collect best-effort PCIe information.
 
@@ -1138,12 +1043,23 @@ def get_pcie_static_info(
         devices = get_all_pcie_devices()
     hardware_info: dict[str, object] = {}
     if include_all_devices:
-        hardware_info["pcie_devices"] = devices
+        hardware_info["pcie_devices"] = [
+            _format_pcie_device(
+                device,
+                dev_no,
+                include_private_identifiers=include_private_identifiers,
+            )
+            for dev_no, device in enumerate(devices)
+        ]
     gpus = _find_all_gpu_devices(devices)
     if gpus:
         gpu_device_indices = _get_gpu_device_indices(devices)
         hardware_info["gpus"] = [
-            _format_pcie_device(device, gpu_device_indices.get(id(device), dev_no))
+            _format_pcie_device(
+                device,
+                gpu_device_indices.get(id(device), dev_no),
+                include_private_identifiers=include_private_identifiers,
+            )
             for dev_no, device in enumerate(gpus)
         ]
     npus = _find_all_npu_devices(devices, vendor_id, device_id, class_filter)
@@ -1151,7 +1067,11 @@ def get_pcie_static_info(
     if npus:
         npu_device_indices = _get_npu_device_indices(devices)
         formatted_npus = [
-            _format_pcie_device(device, npu_device_indices.get(id(device), dev_no))
+            _format_pcie_device(
+                device,
+                npu_device_indices.get(id(device), dev_no),
+                include_private_identifiers=include_private_identifiers,
+            )
             for dev_no, device in enumerate(npus)
         ]
         npu_driver_version = _pop_npu_driver_version(formatted_npus)
@@ -1699,10 +1619,13 @@ def _find_all_gpu_devices(devices: list[dict[str, object]]) -> list[dict[str, ob
     return [device for device in devices if _is_likely_gpu_device(device)]
 
 
-def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, object]:
+def _format_pcie_device(
+    device: dict[str, object],
+    dev_no: int,
+    include_private_identifiers: bool = False,
+) -> dict[str, object]:
     formatted: dict[str, object] = {"dev_no": dev_no}
-    for key in (
-        "bus_address",
+    public_keys = (
         "vendor_id",
         "device_id",
         "subsystem_vendor_id",
@@ -1711,7 +1634,6 @@ def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, obj
         "name",
         "manufacturer",
         "status",
-        "pnp_device_id",
         "revision",
         "driver_version",
         "driver_name",
@@ -1727,7 +1649,9 @@ def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, obj
         "max_link_width",
         "memory_total_bytes",
         "architecture",
-    ):
+    )
+    private_keys = ("bus_address", "pnp_device_id") if include_private_identifiers else ()
+    for key in (*private_keys, *public_keys):
         if device.get(key) is not None:
             formatted[key] = device[key]
 
@@ -1742,6 +1666,38 @@ def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, obj
     elif device.get("current_link_width") is not None:
         formatted["lane_width"] = f"x{device['current_link_width']}"
     return formatted
+
+
+def _sanitize_pcie_device_for_public_output(
+    device: Mapping[str, object],
+) -> dict[str, object]:
+    """Return a copy of a PCIe device without private instance identifiers."""
+    return {
+        key: value
+        for key, value in device.items()
+        if key not in {"bus_address", "pnp_device_id"}
+    }
+
+
+def _sanitize_static_info_for_public_output(info: dict[str, object]) -> dict[str, object]:
+    """Remove private/static legacy fields from public static-info output."""
+    sanitized = _sanitize_value_for_public_output(info)
+    return sanitized if isinstance(sanitized, dict) else {}
+
+
+def _sanitize_value_for_public_output(value: object) -> object:
+    if isinstance(value, dict):
+        cleaned: dict[str, object] = {}
+        for key, item in value.items():
+            if key in {"bus_address", "pnp_device_id", "dimms_collection_note"}:
+                continue
+            if key == "dimms":
+                continue
+            cleaned[key] = _sanitize_value_for_public_output(item)
+        return cleaned
+    if isinstance(value, list):
+        return [_sanitize_value_for_public_output(item) for item in value]
+    return value
 
 
 def _filter_relevant_pcie_devices(

@@ -13,18 +13,17 @@ from mblt_tracker.static_info import (
     _get_cuda_version,
     _get_python_package_version,
     get_cpu_power_policy,
+    get_host_static_info,
     get_nvml_gpu_static_info,
     get_linux_npu_driver_firmware_info,
     _parse_nvcc_cuda_version,
     _read_windows_pci_link_properties,
     _normalize_windows_power_plan_name,
-    _parse_linux_dmidecode_memory,
     _parse_windows_active_power_scheme,
     _parse_windows_pci_id,
     _parse_windows_power_setting_ac_value,
-    _read_dram_dimms_linux,
     _read_lspci_device_metadata,
-    _read_dram_dimms_windows,
+    _read_dram_summary_windows,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
     get_windows_power_policy,
@@ -143,7 +142,6 @@ def test_get_nvml_gpu_static_info_returns_metadata(monkeypatch) -> None:
             "gpus": [
                 {
                     "dev_no": 0,
-                    "bus_address": "0000:17:00.0",
                     "class": "0x030000",
                     "device_id": "0x2bb1",
                     "driver_version": "580.95.05",
@@ -252,7 +250,6 @@ def test_get_nvml_gpu_static_info_matches_windows_pcie_by_nvidia_order(
     assert info["hardware"]["gpus"] == [
         {
             "dev_no": 0,
-            "bus_address": "0000:03:00.0",
             "device_id": "0x2204",
             "driver_description": "NVIDIA GeForce RTX 3090",
             "driver_version": "595.97",
@@ -265,6 +262,44 @@ def test_get_nvml_gpu_static_info_matches_windows_pcie_by_nvidia_order(
             "vendor_id": "0x10de",
         }
     ]
+
+
+def test_get_nvml_gpu_static_info_can_preserve_private_identifiers_for_internal_merge(
+    monkeypatch,
+) -> None:
+    class FakePciInfo:
+        busId = b"00000000:17:00.0"
+
+    class FakeNvml:
+        def nvmlInit(self) -> None:
+            return None
+
+        def nvmlShutdown(self) -> None:
+            return None
+
+        def nvmlDeviceGetCount(self) -> int:
+            return 1
+
+        def nvmlSystemGetDriverVersion(self) -> str:
+            return "580.95.05"
+
+        def nvmlSystemGetCudaDriverVersion(self) -> int:
+            return 12080
+
+        def nvmlDeviceGetHandleByIndex(self, index: int) -> str:
+            return f"handle-{index}"
+
+        def nvmlDeviceGetName(self, _handle: str) -> str:
+            return "NVIDIA RTX Test"
+
+        def nvmlDeviceGetPciInfo(self, _handle: str) -> FakePciInfo:
+            return FakePciInfo()
+
+    monkeypatch.setitem(sys.modules, "pynvml", FakeNvml())
+
+    info = get_nvml_gpu_static_info(include_private_identifiers=True)
+
+    assert info["hardware"]["gpus"][0]["bus_address"] == "0000:17:00.0"
 
 
 def test_deep_merge_matches_gpu_by_bus_address_before_index() -> None:
@@ -356,13 +391,10 @@ def test_get_python_package_version_returns_none_when_import_fails_and_metadata_
     assert _get_python_package_version("qbruntime") is None
 
 
-def test_read_dram_dimms_windows_parses_cim_json(monkeypatch) -> None:
+def test_read_dram_summary_windows_parses_safe_cim_json(monkeypatch) -> None:
     output = """
     [
       {
-        "Manufacturer": "Samsung",
-        "PartNumber": "M378A1K43EB2-CWE   ",
-        "SerialNumber": "12345678",
         "Capacity": "8589934592",
         "Speed": 3200,
         "ConfiguredClockSpeed": 3200,
@@ -371,9 +403,6 @@ def test_read_dram_dimms_windows_parses_cim_json(monkeypatch) -> None:
         "SMBIOSMemoryType": 26
       },
       {
-        "Manufacturer": "SK Hynix",
-        "PartNumber": "HMA81GU6CJR8N-XN",
-        "SerialNumber": "87654321",
         "Capacity": "8589934592",
         "Speed": 3200,
         "ConfiguredClockSpeed": 3200,
@@ -384,272 +413,78 @@ def test_read_dram_dimms_windows_parses_cim_json(monkeypatch) -> None:
     ]
     """
 
-    monkeypatch.setattr(static_info, "run_command", lambda _command: output)
-
-    dimms = _read_dram_dimms_windows()
-
-    assert dimms == [
-        {
-            "manufacturer": "Samsung",
-            "part_number": "M378A1K43EB2-CWE",
-            "serial_number": "12345678",
-            "capacity_bytes": 8589934592,
-            "speed_mhz": 3200,
-            "configured_speed_mhz": 3200,
-            "data_width_bits": 64,
-            "total_width_bits": 72,
-            "type": "DDR4",
-        },
-        {
-            "manufacturer": "SK Hynix",
-            "part_number": "HMA81GU6CJR8N-XN",
-            "serial_number": "87654321",
-            "capacity_bytes": 8589934592,
-            "speed_mhz": 3200,
-            "configured_speed_mhz": 3200,
-            "data_width_bits": 64,
-            "total_width_bits": 64,
-            "type": "DDR4",
-        },
-    ]
-
-
-def test_read_dram_dimms_windows_returns_empty_list_on_command_failure(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(static_info, "run_command", lambda _command: None)
-
-    assert _read_dram_dimms_windows() == []
-
-
-def test_parse_linux_dmidecode_memory() -> None:
-    output = """
-Handle 0x0038, DMI type 17, 40 bytes
-Memory Device
-        Total Width: 64 bits
-        Data Width: 64 bits
-        Size: 16 GB
-        Type: DDR5
-        Speed: 5600 MT/s
-        Manufacturer: Samsung
-        Serial Number: 12345678
-        Part Number: M425R2GA3BB0-CWM
-        Configured Memory Speed: 5600 MT/s
-
-Handle 0x0039, DMI type 17, 40 bytes
-Memory Device
-        Total Width: Unknown
-        Data Width: Unknown
-        Size: No Module Installed
-        Type: Unknown
-        Speed: Unknown
-        Manufacturer: Not Specified
-        Part Number: Not Specified
-    """
-
-    dimms = _parse_linux_dmidecode_memory(output)
-
-    assert dimms == [
-        {
-            "manufacturer": "Samsung",
-            "part_number": "M425R2GA3BB0-CWM",
-            "serial_number": "12345678",
-            "capacity_bytes": 16 * 1024**3,
-            "speed_mhz": 5600,
-            "configured_speed_mhz": 5600,
-            "data_width_bits": 64,
-            "total_width_bits": 64,
-            "type": "DDR5",
-        }
-    ]
-
-
-def test_read_dram_dimms_linux_returns_empty_list_on_command_failure(monkeypatch) -> None:
-    monkeypatch.setattr(static_info, "run_command", lambda _command: None)
-
-    assert _read_dram_dimms_linux() == []
-
-
-def test_read_dram_dimms_linux_tries_non_interactive_sudo(monkeypatch) -> None:
-    output = """
-Handle 0x0038, DMI type 17, 40 bytes
-Memory Device
-        Total Width: 64 bits
-        Data Width: 64 bits
-        Size: 16 GB
-        Type: DDR5
-        Speed: 5600 MT/s
-        Manufacturer: Samsung
-        Serial Number: 12345678
-        Part Number: M425R2GA3BB0-CWM
-        Configured Memory Speed: 5600 MT/s
-    """
     commands = []
 
     def fake_run_command(command):
         commands.append(command)
-        if command == ["sudo", "-n", "dmidecode", "-t", "memory"]:
-            return output
-        return None
+        return output
 
     monkeypatch.setattr(static_info, "run_command", fake_run_command)
 
-    dimms = _read_dram_dimms_linux()
+    summary = _read_dram_summary_windows()
 
-    assert commands == [
-        ["dmidecode", "-t", "memory"],
-        ["sudo", "-n", "dmidecode", "-t", "memory"],
-    ]
-    assert dimms[0]["manufacturer"] == "Samsung"
+    powershell_command = commands[0][-1]
+    assert "Manufacturer" not in powershell_command
+    assert "PartNumber" not in powershell_command
+    assert "SerialNumber" not in powershell_command
+    assert summary == {
+        "ram_type": "DDR4",
+        "speed_mhz": 3200,
+        "configured_speed_mhz": 3200,
+        "theoretical_bandwidth_gbps": 51.2,
+    }
 
 
-def test_read_dram_dimms_linux_skips_password_provider_when_direct_succeeds(
+def test_read_dram_summary_windows_returns_empty_dict_on_command_failure(
     monkeypatch,
 ) -> None:
-    output = """
-Handle 0x0038, DMI type 17, 40 bytes
-Memory Device
-        Total Width: 64 bits
-        Data Width: 64 bits
-        Size: 16 GB
-        Type: DDR5
-        Speed: 5600 MT/s
-        Manufacturer: Samsung
-        Serial Number: 12345678
-        Part Number: M425R2GA3BB0-CWM
-        Configured Memory Speed: 5600 MT/s
-    """
-    commands = []
+    monkeypatch.setattr(static_info, "run_command", lambda _command: None)
 
-    def fake_run_command(command):
-        commands.append(command)
-        if command == ["dmidecode", "-t", "memory"]:
-            return output
+    assert _read_dram_summary_windows() == {}
+
+
+def test_get_host_static_info_linux_does_not_call_dmidecode_or_password_provider(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(static_info.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(static_info.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(static_info.platform, "version", lambda: "test-version")
+    monkeypatch.setattr(static_info.platform, "release", lambda: "test-release")
+    monkeypatch.setattr(static_info.platform, "processor", lambda: "")
+    monkeypatch.setattr(static_info.platform, "uname", lambda: types.SimpleNamespace(processor=""))
+    monkeypatch.setattr(static_info.psutil, "cpu_count", lambda logical=True: 4)
+    monkeypatch.setattr(
+        static_info.psutil,
+        "virtual_memory",
+        lambda: types.SimpleNamespace(total=16, available=8),
+    )
+    monkeypatch.setattr(static_info, "_linux_cpu_identity", lambda: (None, None))
+    monkeypatch.setattr(static_info, "_read_os_release", lambda: {})
+    monkeypatch.setattr(static_info, "get_cpu_power_policy", lambda: {
+        "governor": None,
+        "power_plan": None,
+        "min_processor_state_pct": None,
+        "max_processor_state_pct": None,
+    })
+    monkeypatch.setattr(static_info, "_get_cuda_version", lambda: None)
+    monkeypatch.setattr(static_info, "_get_python_package_version", lambda _name: None)
+
+    def fail_run_command(command):
+        if "dmidecode" in command:
+            raise AssertionError("dmidecode should not be called")
         return None
 
     def fail_password_provider():
         raise AssertionError("password provider should not be called")
 
-    monkeypatch.setattr(static_info, "run_command", fake_run_command)
+    monkeypatch.setattr(static_info, "run_command", fail_run_command)
 
-    dimms = _read_dram_dimms_linux(sudo_password_provider=fail_password_provider)
+    info = get_host_static_info(sudo_password_provider=fail_password_provider)
 
-    assert commands == [["dmidecode", "-t", "memory"]]
-    assert dimms[0]["manufacturer"] == "Samsung"
-
-
-def test_read_dram_dimms_linux_uses_password_for_sudo(monkeypatch) -> None:
-    output = """
-Handle 0x0038, DMI type 17, 40 bytes
-Memory Device
-        Total Width: 64 bits
-        Data Width: 64 bits
-        Size: 16 GB
-        Type: DDR5
-        Speed: 5600 MT/s
-        Manufacturer: Samsung
-        Serial Number: 12345678
-        Part Number: M425R2GA3BB0-CWM
-        Configured Memory Speed: 5600 MT/s
-    """
-    commands = []
-
-    def fake_run_command(command):
-        commands.append((command, None, None))
-        return None
-
-    def fake_run_command_with_input(command, input_text, timeout):
-        commands.append((command, input_text, timeout))
-        return output
-
-    monkeypatch.setattr(static_info, "run_command", fake_run_command)
-    monkeypatch.setattr(static_info, "run_command_with_input", fake_run_command_with_input)
-
-    dimms = _read_dram_dimms_linux(sudo_password="secret")
-
-    assert commands == [
-        (["dmidecode", "-t", "memory"], None, None),
-        (["sudo", "-n", "dmidecode", "-t", "memory"], None, None),
-        (["sudo", "-S", "-p", "", "dmidecode", "-t", "memory"], "secret\n", 30),
-    ]
-    assert dimms[0]["manufacturer"] == "Samsung"
-
-
-def test_read_dram_dimms_linux_defers_password_provider_until_direct_fails(
-    monkeypatch,
-) -> None:
-    output = """
-Handle 0x0038, DMI type 17, 40 bytes
-Memory Device
-        Total Width: 64 bits
-        Data Width: 64 bits
-        Size: 16 GB
-        Type: DDR5
-        Speed: 5600 MT/s
-        Manufacturer: Samsung
-        Serial Number: 12345678
-        Part Number: M425R2GA3BB0-CWM
-        Configured Memory Speed: 5600 MT/s
-    """
-    commands = []
-
-    def fake_run_command(command):
-        commands.append((command, None, None))
-        return None
-
-    def fake_run_command_with_input(command, input_text, timeout):
-        commands.append((command, input_text, timeout))
-        return output
-
-    monkeypatch.setattr(static_info, "run_command", fake_run_command)
-    monkeypatch.setattr(static_info, "run_command_with_input", fake_run_command_with_input)
-
-    dimms = _read_dram_dimms_linux(sudo_password_provider=lambda: "secret")
-
-    assert commands == [
-        (["dmidecode", "-t", "memory"], None, None),
-        (["sudo", "-n", "dmidecode", "-t", "memory"], None, None),
-        (["sudo", "-S", "-p", "", "dmidecode", "-t", "memory"], "secret\n", 30),
-    ]
-    assert dimms[0]["manufacturer"] == "Samsung"
-
-
-def test_read_dram_dimms_linux_tries_non_interactive_sudo_before_password_provider(
-    monkeypatch,
-) -> None:
-    output = """
-Handle 0x0038, DMI type 17, 40 bytes
-Memory Device
-        Total Width: 64 bits
-        Data Width: 64 bits
-        Size: 16 GB
-        Type: DDR5
-        Speed: 5600 MT/s
-        Manufacturer: Samsung
-        Serial Number: 12345678
-        Part Number: M425R2GA3BB0-CWM
-        Configured Memory Speed: 5600 MT/s
-    """
-    commands = []
-
-    def fake_run_command(command):
-        commands.append(command)
-        if command == ["sudo", "-n", "dmidecode", "-t", "memory"]:
-            return output
-        return None
-
-    def fail_password_provider():
-        raise AssertionError("password provider should not be called")
-
-    monkeypatch.setattr(static_info, "run_command", fake_run_command)
-
-    dimms = _read_dram_dimms_linux(sudo_password_provider=fail_password_provider)
-
-    assert commands == [
-        ["dmidecode", "-t", "memory"],
-        ["sudo", "-n", "dmidecode", "-t", "memory"],
-    ]
-    assert dimms[0]["manufacturer"] == "Samsung"
+    dram = info["hardware"]["dram"]
+    assert dram == {"total_bytes": 16, "available_bytes": 8}
+    assert "dimms" not in dram
+    assert "dimms_collection_note" not in dram
 
 
 def test_calculate_theoretical_bandwidth_gbps() -> None:
@@ -706,14 +541,14 @@ def test_get_pcie_static_info_reads_sysfs_and_selects_matching_device(
     npus = cast(list[dict[str, object]], hardware["npus"])
     assert len(npus) == 2
     assert npus[0]["dev_no"] == 0
-    assert npus[0]["bus_address"] == "0000_01_00.0"
+    assert "bus_address" not in npus[0]
     assert npus[0]["vendor_id"] == "0x1ed5"
     assert npus[0]["device_id"] == "0x0100"
     assert npus[0]["current_link_speed"] == "16.0 GT/s PCIe"
     assert npus[0]["link_generation"] == "Gen4"
     assert npus[0]["lane_width"] == "x8"
     assert npus[1]["dev_no"] == 1
-    assert npus[1]["bus_address"] == "0000_03_00.0"
+    assert "bus_address" not in npus[1]
     assert npus[1]["current_link_speed"] == "8.0 GT/s PCIe"
     assert npus[1]["link_generation"] == "Gen3"
     assert npus[1]["lane_width"] == "x4"
@@ -793,7 +628,6 @@ def test_get_pcie_static_info_preserves_original_npu_index_when_filtered() -> No
     assert npus == [
         {
             "dev_no": 1,
-            "bus_address": "0000:02:00.0",
             "vendor_id": "0x209f",
             "device_id": "0x0000",
             "class": "0x120000",
@@ -882,19 +716,13 @@ def test_get_pcie_static_info_includes_gpu_and_raw_devices_when_all_requested(
     info = get_pcie_static_info(include_all_devices=True)
 
     hardware = cast(dict[str, object], info["hardware"])
-    assert [
-        device["bus_address"]
-        for device in cast(list[dict[str, object]], hardware["pcie_devices"])
-    ] == [
-        "0000_01_00.0",
-        "0000_02_00.0",
-        "0000_03_00.0",
-    ]
+    for device in cast(list[dict[str, object]], hardware["pcie_devices"]):
+        assert "bus_address" not in device
+        assert "pnp_device_id" not in device
     gpus = cast(list[dict[str, object]], hardware["gpus"])
     assert gpus == [
         {
             "dev_no": 0,
-            "bus_address": "0000_01_00.0",
             "vendor_id": "0x10de",
             "device_id": "0x2684",
             "class": "0x030000",
@@ -929,7 +757,6 @@ def test_get_pcie_static_info_includes_gpu_but_omits_raw_devices_by_default(
     assert hardware["gpus"] == [
         {
             "dev_no": 0,
-            "bus_address": "0000_01_00.0",
             "vendor_id": "0x10de",
             "device_id": "0x2684",
             "class": "0x030000",
@@ -958,7 +785,6 @@ def test_get_pcie_static_info_includes_amd_gpu_without_nvml() -> None:
     assert hardware["gpus"] == [
         {
             "dev_no": 0,
-            "bus_address": "0000:05:00.0",
             "vendor_id": "0x1002",
             "device_id": "0x744c",
             "class": "0x030000",
@@ -1030,7 +856,6 @@ def test_get_pcie_static_info_filters_windows_devices_by_auxiliary_class(
     assert npus == [
         {
             "dev_no": 0,
-            "bus_address": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&1",
             "vendor_id": "0x209f",
             "device_id": "0x0000",
             "subsystem_device_id": "0x1093",
@@ -1039,7 +864,6 @@ def test_get_pcie_static_info_filters_windows_devices_by_auxiliary_class(
             "name": "MOBILINT NPU Accelerator",
             "manufacturer": "MOBILINT, Inc.",
             "status": "OK",
-            "pnp_device_id": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&1",
             "revision": "0x02",
         }
     ]
@@ -1233,7 +1057,6 @@ def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> 
                         "dev_no": 0,
                         "vendor_id": "0x209f",
                         "name": "MOBILINT NPU Accelerator",
-                        "pnp_device_id": "PCI\\VEN_209F&DEV_0000",
                     }
                 ]
             }
@@ -1250,7 +1073,6 @@ def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> 
             "dev_no": 0,
             "vendor_id": "0x209f",
             "name": "MOBILINT NPU Accelerator",
-            "pnp_device_id": "PCI\\VEN_209F&DEV_0000",
         }
     ]
     assert info["inference"] == {"npu_driver_version": "1.8.1.1348"}

@@ -11,27 +11,16 @@ class CpuHardwareInfo(TypedDict):
     vendor: Optional[str]
 
 
-class DimmInfo(TypedDict, total=False):
-    manufacturer: str
-    part_number: str
-    serial_number: str
-    capacity_bytes: int
-    speed_mhz: int
-    configured_speed_mhz: int
-    data_width_bits: int
-    total_width_bits: int
-    type: str
-
-
 class DramInfo(TypedDict):
     total_bytes: int
     available_bytes: int
 
 
 class DramInfoOptional(DramInfo, total=False):
-    dimms: list[DimmInfo]
+    ram_type: str
+    speed_mhz: int
+    configured_speed_mhz: int
     theoretical_bandwidth_gbps: float
-    dimms_collection_note: str
 
 
 class CpuPowerPolicy(TypedDict):
@@ -82,7 +71,6 @@ PcieDeviceInfo = TypedDict(
     "PcieDeviceInfo",
     {
         "dev_no": int,
-        "bus_address": str,
         "vendor_id": str,
         "device_id": str,
         "subsystem_vendor_id": str,
@@ -91,7 +79,6 @@ PcieDeviceInfo = TypedDict(
         "name": str,
         "manufacturer": str,
         "status": str,
-        "pnp_device_id": str,
         "revision": str,
         "driver_version": str,
         "driver_name": str,
@@ -161,7 +148,6 @@ STATIC_INFO_CHILD_SCHEMAS: dict[type, dict[str, object]] = {
         "npus": [NpuDeviceInfo],
         "pcie_devices": [PcieDeviceInfo],
     },
-    DramInfoOptional: {"dimms": [DimmInfo]},
     GpuHardwareInfoOptional: {"devices": [GpuStaticDeviceInfo]},
     InferenceInfo: {
         "cpu": CpuPowerPolicy,

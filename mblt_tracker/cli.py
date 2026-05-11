@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import json
-import platform
 import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence, TextIO, cast
@@ -13,6 +11,7 @@ from .static_info import (
     _clean_typed_dict,
     _deep_merge,
     _remove_os_pcie_link_fields,
+    _sanitize_static_info_for_public_output,
     get_all_pcie_devices,
     get_linux_npu_driver_firmware_info,
     get_host_static_info,
@@ -45,6 +44,7 @@ def collect_static_info(
         class_filter=pcie_class_filter,
         include_all_devices=all_pcie_devices,
         devices=pcie_devices,
+        include_private_identifiers=True,
     )
     npu_metadata_filter = (
         _extract_hardware_npus(pcie_info)
@@ -52,7 +52,10 @@ def collect_static_info(
         else None
     )
     _deep_merge(info, pcie_info)
-    nvml_gpu_info = get_nvml_gpu_static_info(pcie_devices=pcie_devices)
+    nvml_gpu_info = get_nvml_gpu_static_info(
+        pcie_devices=pcie_devices,
+        include_private_identifiers=True,
+    )
     _remove_os_link_fields_for_nvml_gpu_matches(info, nvml_gpu_info)
     _deep_merge(
         info,
@@ -72,7 +75,8 @@ def collect_static_info(
         info,
         _collect_linux_npu_metadata(npu_metadata_filter),
     )
-    return cast(CollectOutput, _clean_typed_dict(info, CollectOutput))
+    public_info = _sanitize_static_info_for_public_output(info)
+    return cast(CollectOutput, _clean_typed_dict(public_info, CollectOutput))
 
 
 def _has_pcie_filter(
@@ -210,7 +214,10 @@ def build_parser() -> argparse.ArgumentParser:
     collect_parser.add_argument(
         "--all-pcie-devices",
         action="store_true",
-        help="Include all PCIe devices instead of only GPU/NPU-related devices.",
+        help=(
+            "Include all PCIe devices instead of only GPU/NPU-related devices; "
+            "private identifiers are still omitted from output."
+        ),
     )
 
     return parser
@@ -230,17 +237,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "collect":
-        sudo_password_provider = None
-        if platform.system() == "Linux" and sys.stdin.isatty():
-            sudo_password_provider = lambda: getpass.getpass(
-                "[sudo] password for dmidecode: "
-            )
         info = collect_static_info(
             pcie_vendor_id=args.pcie_vendor_id,
             pcie_device_id=args.pcie_device_id,
             pcie_class_filter=args.pcie_class_filter,
             all_pcie_devices=args.all_pcie_devices,
-            sudo_password_provider=sudo_password_provider,
+            sudo_password_provider=None,
         )
         _write_json(info, args.output, sys.stdout)
         return 0
