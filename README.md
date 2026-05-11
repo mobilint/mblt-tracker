@@ -116,14 +116,142 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
 
 ### Example Output
 
-The following example shows a representative `mblt-tracker collect` output. Public
-static output intentionally omits privacy-sensitive host and device instance
-identifiers: DRAM DIMM serial/part/manufacturer details are not collected, and
-PCIe `bus_address` / Windows `pnp_device_id` are not exposed, including when
-`--all-pcie-devices` is used.
+The following examples show representative `mblt-tracker collect` outputs across
+Windows and Linux systems. Public static output intentionally omits
+privacy-sensitive host and device instance identifiers: DRAM DIMM
+serial/part/manufacturer details are not collected, and PCIe `bus_address` /
+Windows `pnp_device_id` are not exposed, including when `--all-pcie-devices` is
+used.
+
+#### Windows host with Intel UHD Graphics, NVIDIA RTX 3090, and Mobilint NPU
 
 ```bash
 $ mblt-tracker collect
+WARNING:root:imports error
+ You need to install pymongo>=3.9.0 in order to use MongoOutput
+WARNING:root:imports error
+  You need to install pandas>=0.25.1 in order to use DataFrameOutput
+{
+  "hardware": {
+    "cpu": {
+      "architecture": "AMD64",
+      "logical_cores": 20,
+      "model_name": "13th Gen Intel(R) Core(TM) i5-13500",
+      "physical_cores": 14,
+      "vendor": "GenuineIntel"
+    },
+    "dram": {
+      "available_bytes": 15008358400,
+      "configured_speed_mhz": 5600,
+      "ram_type": "DDR5",
+      "speed_mhz": 5600,
+      "theoretical_bandwidth_gbps": 89.6,
+      "total_bytes": 34113015808
+    },
+    "gpus": [
+      {
+        "class": "0x038000",
+        "dev_no": 0,
+        "device_id": "0x4680",
+        "driver_date": "/Date(1764547200000)/",
+        "driver_description": "Intel(R) UHD Graphics 770",
+        "driver_provider": "Intel Corporation",
+        "driver_version": "32.0.101.7082",
+        "manufacturer": "Intel Corporation",
+        "name": "Intel(R) UHD Graphics 770",
+        "revision": "0x0c",
+        "status": "OK",
+        "subsystem_device_id": "0x7d96",
+        "subsystem_vendor_id": "0x1462",
+        "vendor_id": "0x8086"
+      },
+      {
+        "architecture": "Ampere",
+        "class": "0x030000",
+        "dev_no": 0,
+        "device_id": "0x2204",
+        "driver_date": "/Date(1773705600000)/",
+        "driver_description": "NVIDIA GeForce RTX 3090",
+        "driver_provider": "NVIDIA",
+        "driver_version": "595.97",
+        "lane_width": "x4",
+        "link_generation": "Gen1",
+        "manufacturer": "NVIDIA",
+        "memory_total_bytes": 25769803776,
+        "name": "NVIDIA GeForce RTX 3090",
+        "revision": "0xa1",
+        "status": "OK",
+        "subsystem_device_id": "0x1454",
+        "subsystem_vendor_id": "0x10de",
+        "vendor_id": "0x10de"
+      }
+    ],
+    "npus": [
+      {
+        "class": "0x078000",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 0,
+        "device_id": "0x0000",
+        "driver_date": "/Date(1774828800000)/",
+        "driver_description": "MOBILINT NPU Accelerator",
+        "driver_provider": "MOBILINT, Inc.",
+        "lane_width": "x8",
+        "link_generation": "Gen4",
+        "manufacturer": "MOBILINT, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "name": "MOBILINT NPU Accelerator",
+        "revision": "0x02",
+        "status": "OK",
+        "subsystem_device_id": "0x1093",
+        "subsystem_vendor_id": "0x0402",
+        "vendor_id": "0x209f"
+      }
+    ]
+  },
+  "inference": {
+    "cpu": {
+      "governor": null,
+      "max_processor_state_pct": 100,
+      "min_processor_state_pct": 100,
+      "power_plan": "High performance"
+    },
+    "cuda": {
+      "version": "not_found"
+    },
+    "gpu": {
+      "cuda_driver": {
+        "version": "13.2"
+      },
+      "driver": {
+        "version": "595.97"
+      }
+    },
+    "npu_driver_version": "1.8.1.1348",
+    "os": {
+      "kernel_version": "11",
+      "name": "Windows",
+      "version": "10.0.26200"
+    },
+    "qbcompiler": {
+      "version": "not_installed"
+    },
+    "qbruntime": {
+      "version": "v1.2.0"
+    }
+  }
+}
+```
+
+#### Linux host with NVIDIA RTX PRO 6000 Blackwell GPUs and MLA100
+
+```bash
+$ mblt-tracker collect
+WARNING:root:imports error
+ You need to install pymongo>=3.9.0 in order to use MongoOutput
+WARNING:root:imports error
+  You need to install pandas>=0.25.1 in order to use DataFrameOutput
 {
   "hardware": {
     "cpu": {
@@ -134,10 +262,21 @@ $ mblt-tracker collect
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 321980788736,
+      "available_bytes": 321193263104,
       "total_bytes": 405389791232
     },
     "gpus": [
+      {
+        "class": "0x030000",
+        "dev_no": 0,
+        "device_id": "0x2000",
+        "manufacturer": "ASPEED Technology, Inc.",
+        "name": "ASPEED Graphics Family",
+        "revision": "0x52",
+        "subsystem_device_id": "0x1c6b",
+        "subsystem_vendor_id": "0x15d9",
+        "vendor_id": "0x1a03"
+      },
       {
         "architecture": "Blackwell",
         "class": "0x030000",
@@ -146,6 +285,22 @@ $ mblt-tracker collect
         "driver_version": "580.95.05",
         "lane_width": "x16",
         "link_generation": "Gen1",
+        "manufacturer": "NVIDIA Corporation",
+        "memory_total_bytes": 102641958912,
+        "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+        "revision": "0xa1",
+        "subsystem_device_id": "0x204b",
+        "subsystem_vendor_id": "0x10de",
+        "vendor_id": "0x10de"
+      },
+      {
+        "architecture": "Blackwell",
+        "class": "0x030000",
+        "dev_no": 1,
+        "device_id": "0x2bb1",
+        "driver_version": "580.95.05",
+        "lane_width": "x16",
+        "link_generation": "Gen5",
         "manufacturer": "NVIDIA Corporation",
         "memory_total_bytes": 102641958912,
         "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
@@ -177,7 +332,7 @@ $ mblt-tracker collect
         "memory_total_bytes": 17179869184,
         "name": "Aries",
         "product": "Aries",
-        "revision": "0x02",
+        "revision": "0x2",
         "subsystem_device_id": "0x1093",
         "subsystem_vendor_id": "0x401",
         "vendor_id": "0x209F"
@@ -211,6 +366,165 @@ $ mblt-tracker collect
       "kernel_version": "6.8.0-110-generic",
       "name": "Linux",
       "version": "Ubuntu 24.04 LTS"
+    },
+    "qbcompiler": {
+      "version": "not_installed"
+    },
+    "qbruntime": {
+      "version": "v1.2.0"
+    }
+  }
+}
+```
+
+#### Linux host with MLA400 NPUs and NVML unavailable
+
+```bash
+$ mblt-tracker collect
+WARNING:root:imports error
+ You need to install pymongo>=3.9.0 in order to use MongoOutput
+WARNING:root:imports error
+  You need to install pandas>=0.25.1 in order to use DataFrameOutput
+Warning: NVML not available. GPU information will not be collected.
+{
+  "hardware": {
+    "cpu": {
+      "architecture": "x86_64",
+      "logical_cores": 16,
+      "model_name": "11th Gen Intel(R) Core(TM) i7-11700K @ 3.60GHz",
+      "physical_cores": 8,
+      "vendor": "GenuineIntel"
+    },
+    "dram": {
+      "available_bytes": 15901192192,
+      "total_bytes": 67178881024
+    },
+    "npus": [
+      {
+        "board_name": "aries0",
+        "card_id": 0,
+        "card_model": "MLA400",
+        "class": "0x7800002",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 0,
+        "device_id": "0x0",
+        "firmware": {
+          "revision": "0",
+          "version": "1.2.5"
+        },
+        "lane_width": "8",
+        "link_generation": "4",
+        "manufacturer": "Mobilint, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
+        "name": "Aries",
+        "product": "Aries",
+        "revision": "0x2",
+        "subsystem_device_id": "0x108B",
+        "subsystem_vendor_id": "0x402",
+        "vendor_id": "0x209F"
+      },
+      {
+        "board_name": "aries1",
+        "card_id": 0,
+        "card_model": "MLA400",
+        "class": "0x7800002",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 1,
+        "device_id": "0x0",
+        "firmware": {
+          "revision": "0",
+          "version": "1.2.5"
+        },
+        "lane_width": "8",
+        "link_generation": "4",
+        "manufacturer": "Mobilint, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
+        "name": "Aries",
+        "product": "Aries",
+        "revision": "0x2",
+        "subsystem_device_id": "0x108B",
+        "subsystem_vendor_id": "0x402",
+        "vendor_id": "0x209F"
+      },
+      {
+        "board_name": "aries2",
+        "card_id": 0,
+        "card_model": "MLA400",
+        "class": "0x7800002",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 2,
+        "device_id": "0x0",
+        "firmware": {
+          "revision": "0",
+          "version": "1.2.5"
+        },
+        "lane_width": "8",
+        "link_generation": "4",
+        "manufacturer": "Mobilint, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
+        "name": "Aries",
+        "product": "Aries",
+        "revision": "0x2",
+        "subsystem_device_id": "0x108B",
+        "subsystem_vendor_id": "0x402",
+        "vendor_id": "0x209F"
+      },
+      {
+        "board_name": "aries3",
+        "card_id": 0,
+        "card_model": "MLA400",
+        "class": "0x7800002",
+        "current_link_speed": "16.0 GT/s PCIe",
+        "current_link_width": "8",
+        "dev_no": 3,
+        "device_id": "0x0",
+        "firmware": {
+          "revision": "0",
+          "version": "1.2.5"
+        },
+        "lane_width": "8",
+        "link_generation": "4",
+        "manufacturer": "Mobilint, Inc.",
+        "max_link_speed": "16.0 GT/s PCIe",
+        "max_link_width": "8",
+        "memory_total_bytes": 17179869184,
+        "name": "Aries",
+        "product": "Aries",
+        "revision": "0x2",
+        "subsystem_device_id": "0x108B",
+        "subsystem_vendor_id": "0x402",
+        "vendor_id": "0x209F"
+      }
+    ]
+  },
+  "inference": {
+    "cpu": {
+      "governor": "powersave",
+      "max_processor_state_pct": null,
+      "min_processor_state_pct": null,
+      "power_plan": null
+    },
+    "cuda": {
+      "version": "12.8"
+    },
+    "driver": {
+      "aries_version": "1.12.0",
+      "regulus_version": "N/A"
+    },
+    "npu_driver_version": "1.12.0",
+    "os": {
+      "kernel_version": "6.17.0-20-generic",
+      "name": "Linux",
+      "version": "Ubuntu 24.04.2 LTS"
     },
     "qbcompiler": {
       "version": "not_installed"
