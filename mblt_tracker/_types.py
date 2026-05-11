@@ -1,26 +1,14 @@
 from __future__ import annotations
 
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 
 class CpuHardwareInfo(TypedDict):
     architecture: str
-    physical_cores: Optional[int]
-    logical_cores: Optional[int]
-    model_name: Optional[str]
-    vendor: Optional[str]
-
-
-class DimmInfo(TypedDict, total=False):
-    manufacturer: str
-    part_number: str
-    serial_number: str
-    capacity_bytes: int
-    speed_mhz: int
-    configured_speed_mhz: int
-    data_width_bits: int
-    total_width_bits: int
-    type: str
+    physical_cores: int | None
+    logical_cores: int | None
+    model_name: str | None
+    vendor: str | None
 
 
 class DramInfo(TypedDict):
@@ -29,20 +17,21 @@ class DramInfo(TypedDict):
 
 
 class DramInfoOptional(DramInfo, total=False):
-    dimms: list[DimmInfo]
+    ram_type: str
+    speed_mhz: int
+    configured_speed_mhz: int
     theoretical_bandwidth_gbps: float
-    dimms_collection_note: str
 
 
 class CpuPowerPolicy(TypedDict):
-    governor: Optional[str]
-    power_plan: Optional[str]
-    min_processor_state_pct: Optional[int]
-    max_processor_state_pct: Optional[int]
+    governor: str | None
+    power_plan: str | None
+    min_processor_state_pct: int | None
+    max_processor_state_pct: int | None
 
 
 class VersionInfo(TypedDict):
-    version: Optional[str]
+    version: str | None
 
 
 class OsInfo(TypedDict):
@@ -52,12 +41,12 @@ class OsInfo(TypedDict):
 
 
 class NpuDriverInfo(TypedDict):
-    aries_version: Optional[str]
-    regulus_version: Optional[str]
+    aries_version: str | None
+    regulus_version: str | None
 
 
 class NpuFirmwareInfo(TypedDict):
-    version: Optional[str]
+    version: str | None
 
 
 class GpuStaticDeviceInfo(TypedDict):
@@ -66,7 +55,7 @@ class GpuStaticDeviceInfo(TypedDict):
 
 
 class GpuHardwareInfo(TypedDict):
-    device_count: Optional[int]
+    device_count: int | None
 
 
 class GpuHardwareInfoOptional(GpuHardwareInfo, total=False):
@@ -82,7 +71,6 @@ PcieDeviceInfo = TypedDict(
     "PcieDeviceInfo",
     {
         "dev_no": int,
-        "bus_address": str,
         "vendor_id": str,
         "device_id": str,
         "subsystem_vendor_id": str,
@@ -91,7 +79,6 @@ PcieDeviceInfo = TypedDict(
         "name": str,
         "manufacturer": str,
         "status": str,
-        "pnp_device_id": str,
         "revision": str,
         "driver_version": str,
         "driver_name": str,
@@ -161,7 +148,6 @@ STATIC_INFO_CHILD_SCHEMAS: dict[type, dict[str, object]] = {
         "npus": [NpuDeviceInfo],
         "pcie_devices": [PcieDeviceInfo],
     },
-    DramInfoOptional: {"dimms": [DimmInfo]},
     GpuHardwareInfoOptional: {"devices": [GpuStaticDeviceInfo]},
     InferenceInfo: {
         "cpu": CpuPowerPolicy,

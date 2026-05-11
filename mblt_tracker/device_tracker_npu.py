@@ -14,6 +14,7 @@ from .static_info import (
     _deep_merge,
     _filter_npu_metadata_to_selected_devices,
     _mla400_static_card_id,
+    _sanitize_static_info_for_public_output,
     get_all_pcie_devices,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
@@ -426,6 +427,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
             device_id=pcie_device_id,
             class_filter=pcie_class_filter,
             devices=pcie_devices,
+            include_private_identifiers=True,
         )
         hardware = info.get("hardware", {})
         filtered_npus = []
@@ -450,7 +452,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
                 if has_pcie_filter:
                     _filter_npu_metadata_to_selected_devices(status_info, filtered_npus)
                 _deep_merge(info, status_info)
-        return info
+        return _sanitize_static_info_for_public_output(info)
 
     def get_util_trace(self) -> list[tuple[float, float]]:
         """Return a time-series trace of NPU utilization.

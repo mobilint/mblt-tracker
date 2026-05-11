@@ -116,15 +116,21 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
 
 ### Example Output
 
-The following examples show representative `mblt-tracker collect` outputs from
-three host configurations: Windows with one MLA100-class Mobilint NPU and one
-NVIDIA GPU, Linux with one MLA100 card, and Linux with one MLA400 card exposed as
-four Aries devices.
+The following examples show representative `mblt-tracker collect` outputs across
+Windows and Linux systems. Public static output intentionally omits
+privacy-sensitive host and device instance identifiers: DRAM DIMM
+serial/part/manufacturer details are not collected, and PCIe `bus_address` /
+Windows `pnp_device_id` are not exposed, including when `--all-pcie-devices` is
+used.
 
-#### Windows: MLA100 + NVIDIA GPU
+#### Windows host with Intel UHD Graphics, NVIDIA RTX 3090, and Mobilint NPU
 
-```powershell
-> mblt-tracker collect
+```bash
+$ mblt-tracker collect
+WARNING:root:imports error
+ You need to install pymongo>=3.9.0 in order to use MongoOutput
+WARNING:root:imports error
+  You need to install pandas>=0.25.1 in order to use DataFrameOutput
 {
   "hardware": {
     "cpu": {
@@ -135,37 +141,15 @@ four Aries devices.
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 13193584640,
-      "dimms": [
-        {
-          "capacity_bytes": 17179869184,
-          "configured_speed_mhz": 5600,
-          "data_width_bits": 64,
-          "manufacturer": "Samsung",
-          "part_number": "M323R2GA3PB0-CWMOL",
-          "serial_number": "48A201A4",
-          "speed_mhz": 5600,
-          "total_width_bits": 64,
-          "type": "DDR5"
-        },
-        {
-          "capacity_bytes": 17179869184,
-          "configured_speed_mhz": 5600,
-          "data_width_bits": 64,
-          "manufacturer": "Samsung",
-          "part_number": "M323R2GA3PB0-CWMOL",
-          "serial_number": "48A201E5",
-          "speed_mhz": 5600,
-          "total_width_bits": 64,
-          "type": "DDR5"
-        }
-      ],
+      "available_bytes": 15008358400,
+      "configured_speed_mhz": 5600,
+      "ram_type": "DDR5",
+      "speed_mhz": 5600,
       "theoretical_bandwidth_gbps": 89.6,
       "total_bytes": 34113015808
     },
     "gpus": [
       {
-        "bus_address": "PCI\\VEN_8086&DEV_4680&SUBSYS_7D961462&REV_0C\\3&11583659&0&10",
         "class": "0x038000",
         "dev_no": 0,
         "device_id": "0x4680",
@@ -175,7 +159,6 @@ four Aries devices.
         "driver_version": "32.0.101.7082",
         "manufacturer": "Intel Corporation",
         "name": "Intel(R) UHD Graphics 770",
-        "pnp_device_id": "PCI\\VEN_8086&DEV_4680&SUBSYS_7D961462&REV_0C\\3&11583659&0&10",
         "revision": "0x0c",
         "status": "OK",
         "subsystem_device_id": "0x7d96",
@@ -184,7 +167,6 @@ four Aries devices.
       },
       {
         "architecture": "Ampere",
-        "bus_address": "0000:03:00.0",
         "class": "0x030000",
         "dev_no": 0,
         "device_id": "0x2204",
@@ -197,7 +179,6 @@ four Aries devices.
         "manufacturer": "NVIDIA",
         "memory_total_bytes": 25769803776,
         "name": "NVIDIA GeForce RTX 3090",
-        "pnp_device_id": "PCI\\VEN_10DE&DEV_2204&SUBSYS_145410DE&REV_A1\\4&126C804A&0&00E0",
         "revision": "0xa1",
         "status": "OK",
         "subsystem_device_id": "0x1454",
@@ -207,7 +188,6 @@ four Aries devices.
     ],
     "npus": [
       {
-        "bus_address": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008",
         "class": "0x078000",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
@@ -222,7 +202,6 @@ four Aries devices.
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "name": "MOBILINT NPU Accelerator",
-        "pnp_device_id": "PCI\\VEN_209F&DEV_0000&SUBSYS_10930402&REV_02\\4&3691B449&0&0008",
         "revision": "0x02",
         "status": "OK",
         "subsystem_device_id": "0x1093",
@@ -265,11 +244,14 @@ four Aries devices.
 }
 ```
 
-#### Linux: MLA100 + NVIDIA GPUs
+#### Linux host with NVIDIA RTX PRO 6000 Blackwell GPUs and MLA100
 
 ```bash
 $ mblt-tracker collect
-[sudo] password for dmidecode:
+WARNING:root:imports error
+ You need to install pymongo>=3.9.0 in order to use MongoOutput
+WARNING:root:imports error
+  You need to install pandas>=0.25.1 in order to use DataFrameOutput
 {
   "hardware": {
     "cpu": {
@@ -280,81 +262,11 @@ $ mblt-tracker collect
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 321980788736,
-      "dimms": [
-        {
-          "capacity_bytes": 68719476736,
-          "configured_speed_mhz": 4800,
-          "data_width_bits": 64,
-          "manufacturer": "Samsung",
-          "part_number": "M321R8GA0BB0-CQKZJ",
-          "serial_number": "80CE01233104F96929",
-          "speed_mhz": 4800,
-          "total_width_bits": 80,
-          "type": "DDR5"
-        },
-        {
-          "capacity_bytes": 68719476736,
-          "configured_speed_mhz": 4800,
-          "data_width_bits": 64,
-          "manufacturer": "Samsung",
-          "part_number": "M321R8GA0BB0-CQKZJ",
-          "serial_number": "80CE01232804E78C2F",
-          "speed_mhz": 4800,
-          "total_width_bits": 80,
-          "type": "DDR5"
-        },
-        {
-          "capacity_bytes": 68719476736,
-          "configured_speed_mhz": 4800,
-          "data_width_bits": 64,
-          "manufacturer": "Samsung",
-          "part_number": "M321R8GA0BB0-CQKZJ",
-          "serial_number": "80CE01232804E78A42",
-          "speed_mhz": 4800,
-          "total_width_bits": 80,
-          "type": "DDR5"
-        },
-        {
-          "capacity_bytes": 68719476736,
-          "configured_speed_mhz": 4800,
-          "data_width_bits": 64,
-          "manufacturer": "Samsung",
-          "part_number": "M321R8GA0BB0-CQKZJ",
-          "serial_number": "80CE01232804E78C30",
-          "speed_mhz": 4800,
-          "total_width_bits": 80,
-          "type": "DDR5"
-        },
-        {
-          "capacity_bytes": 68719476736,
-          "configured_speed_mhz": 4800,
-          "data_width_bits": 64,
-          "manufacturer": "Samsung",
-          "part_number": "M321R8GA0BB0-CQKZJ",
-          "serial_number": "80CE01232804E65B3B",
-          "speed_mhz": 4800,
-          "total_width_bits": 80,
-          "type": "DDR5"
-        },
-        {
-          "capacity_bytes": 68719476736,
-          "configured_speed_mhz": 4800,
-          "data_width_bits": 64,
-          "manufacturer": "Samsung",
-          "part_number": "M321R8GA0BB0-CQKZJ",
-          "serial_number": "80CE01232804E78A46",
-          "speed_mhz": 4800,
-          "total_width_bits": 80,
-          "type": "DDR5"
-        }
-      ],
-      "theoretical_bandwidth_gbps": 230.4,
+      "available_bytes": 321193263104,
       "total_bytes": 405389791232
     },
     "gpus": [
       {
-        "bus_address": "0000:02:00.0",
         "class": "0x030000",
         "dev_no": 0,
         "device_id": "0x2000",
@@ -367,7 +279,6 @@ $ mblt-tracker collect
       },
       {
         "architecture": "Blackwell",
-        "bus_address": "0000:17:00.0",
         "class": "0x030000",
         "dev_no": 0,
         "device_id": "0x2bb1",
@@ -384,13 +295,12 @@ $ mblt-tracker collect
       },
       {
         "architecture": "Blackwell",
-        "bus_address": "0000:e1:00.0",
         "class": "0x030000",
         "dev_no": 1,
         "device_id": "0x2bb1",
         "driver_version": "580.95.05",
         "lane_width": "x16",
-        "link_generation": "Gen1",
+        "link_generation": "Gen5",
         "manufacturer": "NVIDIA Corporation",
         "memory_total_bytes": 102641958912,
         "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
@@ -403,7 +313,6 @@ $ mblt-tracker collect
     "npus": [
       {
         "board_name": "aries0",
-        "bus_address": "0000:bd:00.0",
         "card_id": 0,
         "card_model": "MLA100",
         "class": "0x7800002",
@@ -423,7 +332,7 @@ $ mblt-tracker collect
         "memory_total_bytes": 17179869184,
         "name": "Aries",
         "product": "Aries",
-        "revision": "0x02",
+        "revision": "0x2",
         "subsystem_device_id": "0x1093",
         "subsystem_vendor_id": "0x401",
         "vendor_id": "0x209F"
@@ -468,11 +377,14 @@ $ mblt-tracker collect
 }
 ```
 
-#### Linux: MLA400 card (4 Aries devices)
+#### Linux host with MLA400 NPUs and NVML unavailable
 
 ```bash
 $ mblt-tracker collect
-[sudo] password for dmidecode:
+WARNING:root:imports error
+ You need to install pymongo>=3.9.0 in order to use MongoOutput
+WARNING:root:imports error
+  You need to install pandas>=0.25.1 in order to use DataFrameOutput
 Warning: NVML not available. GPU information will not be collected.
 {
   "hardware": {
@@ -484,38 +396,12 @@ Warning: NVML not available. GPU information will not be collected.
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 15836319744,
-      "dimms": [
-        {
-          "capacity_bytes": 34359738368,
-          "configured_speed_mhz": 3200,
-          "data_width_bits": 64,
-          "manufacturer": "Samsung",
-          "part_number": "M378A4G43AB2-CWE",
-          "serial_number": "331C9F38",
-          "speed_mhz": 3200,
-          "total_width_bits": 64,
-          "type": "DDR4"
-        },
-        {
-          "capacity_bytes": 34359738368,
-          "configured_speed_mhz": 3200,
-          "data_width_bits": 64,
-          "manufacturer": "Samsung",
-          "part_number": "M378A4G43AB2-CWE",
-          "serial_number": "331CA394",
-          "speed_mhz": 3200,
-          "total_width_bits": 64,
-          "type": "DDR4"
-        }
-      ],
-      "theoretical_bandwidth_gbps": 51.2,
+      "available_bytes": 15901192192,
       "total_bytes": 67178881024
     },
     "npus": [
       {
         "board_name": "aries0",
-        "bus_address": "0000:03:00.0",
         "card_id": 0,
         "card_model": "MLA400",
         "class": "0x7800002",
@@ -542,7 +428,6 @@ Warning: NVML not available. GPU information will not be collected.
       },
       {
         "board_name": "aries1",
-        "bus_address": "0000:04:00.0",
         "card_id": 0,
         "card_model": "MLA400",
         "class": "0x7800002",
@@ -569,7 +454,6 @@ Warning: NVML not available. GPU information will not be collected.
       },
       {
         "board_name": "aries2",
-        "bus_address": "0000:05:00.0",
         "card_id": 0,
         "card_model": "MLA400",
         "class": "0x7800002",
@@ -596,7 +480,6 @@ Warning: NVML not available. GPU information will not be collected.
       },
       {
         "board_name": "aries3",
-        "bus_address": "0000:06:00.0",
         "card_id": 0,
         "card_model": "MLA400",
         "class": "0x7800002",
@@ -704,7 +587,7 @@ Uses the **Intel RAPL DRAM domain** through `pyRAPL` for host DRAM power measure
 - **Features**: Tracks all detected CPU socket DRAM domains by default, or specific socket IDs with `DRAMDeviceTracker(socket_id=0)` / `DRAMDeviceTracker(socket_id=[0, 1])`.
 - **Metrics**: Reports total host DRAM power through standard keys (`avg_power_w`, `p99_power_w`, `max_power_w`) and DRAM-specific aliases (`avg_dram_power_w`, `p99_dram_power_w`, `max_dram_power_w`). Per-socket statistics are returned under `metrics["dram"]`.
 - **Trace**: `DRAMDeviceTracker.get_trace()` returns total host DRAM power as `list[(timestamp, power_w)]`.
-- **Static Info**: `DRAMDeviceTracker.get_static_info()` returns the same best-effort host CPU, DRAM DIMM, and OS metadata as host static collection.
+- **Static Info**: `DRAMDeviceTracker.get_static_info()` returns the same privacy-first host CPU, aggregate DRAM capacity, and OS metadata as host static collection. Individual DIMM identifiers are not collected.
 
 ### Mobilint NPU
 
@@ -787,18 +670,17 @@ tracker = CPUDeviceTracker()
 info = tracker.get_static_info()
 ```
 
-Static information is collected on a best-effort basis and may vary by platform and permissions.
+Static information is collected on a best-effort, privacy-first basis and may vary by platform and permissions.
 
 Typical fields include:
 
 - `hardware.cpu`: CPU architecture, model name, vendor, physical cores, logical cores
-- `hardware.dram`: total and available memory in bytes
-- `hardware.dram.dimms`: physical DIMM metadata from `dmidecode` when available. On Linux, sudo password is required for the CLI to collect this interactively.
+- `hardware.dram`: total and available memory in bytes, plus optional privacy-safe aggregate fields such as `ram_type`, `speed_mhz`, `configured_speed_mhz`, and `theoretical_bandwidth_gbps` when available. Individual DIMM serial numbers, part numbers, manufacturers, and `hardware.dram.dimms` are not collected or exposed.
 - `inference.os`: OS name, version, and kernel version
 - `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
 - `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names
-- `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices enriched with PCIe vendor/device IDs and link information where available
-- `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, link information, and firmware metadata where available
+- `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices enriched with PCIe vendor/device IDs and link information where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
+- `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, link information, and firmware metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
 - `hardware.npus[].card_model`: best-effort Mobilint card model classification such as `MLA100` or `MLA400` when `mobilint-cli status -q` exposes enough information
 - `hardware.npus[].card_id`: logical NPU card ID used by `NPUDeviceTracker(npu_id=...)`; MLA400 Aries chips share the same card ID
 - `inference.gpu`: NVIDIA driver and CUDA driver versions. The CLI normalizes the CUDA driver version as a string such as `"13.0"`; `GPUDeviceTracker.get_static_info()` returns the raw NVML CUDA driver integer.

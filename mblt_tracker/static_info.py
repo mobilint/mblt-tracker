@@ -7,9 +7,10 @@ import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional, Sequence, Union, cast
+from typing import Any, Callable, cast
 
 import psutil
 
@@ -17,13 +18,12 @@ from ._types import (
     STATIC_INFO_CHILD_SCHEMAS,
     CollectOutput,
     CpuPowerPolicy,
-    DimmInfo,
 )
 
 
 def get_host_static_info(
-    sudo_password: Optional[str] = None,
-    sudo_password_provider: Optional[Callable[[], str]] = None,
+    sudo_password: str | None = None,
+    sudo_password_provider: Callable[[], str] | None = None,
 ) -> CollectOutput:
     """Collect best-effort host CPU, DRAM, and OS static information."""
     virtual_memory = psutil.virtual_memory()
@@ -72,26 +72,7 @@ def get_host_static_info(
         cpu_info["vendor"] = vendor
 
     if platform.system() == "Windows":
-        dimms = _read_dram_dimms_windows()
-    elif platform.system() == "Linux":
-        dimms = _read_dram_dimms_linux(
-            sudo_password=sudo_password,
-            sudo_password_provider=sudo_password_provider,
-        )
-    else:
-        dimms = []
-    if dimms:
-        dram = info["hardware"]["dram"]
-        dram["dimms"] = cast(list[DimmInfo], dimms)
-        theoretical_bandwidth_gbps = _calculate_theoretical_bandwidth_gbps(dimms)
-        if theoretical_bandwidth_gbps is not None:
-            dram["theoretical_bandwidth_gbps"] = theoretical_bandwidth_gbps
-    elif platform.system() == "Linux":
-        info["hardware"]["dram"]["dimms_collection_note"] = (
-            "Physical DIMM metadata requires dmidecode access. Run "
-            "`mblt-tracker collect` in an interactive terminal and enter the "
-            "sudo password, or install/configure dmidecode."
-        )
+        info["hardware"]["dram"].update(_read_dram_summary_windows())
 
     if platform.system() == "Linux":
         os_release = _read_os_release()
@@ -133,7 +114,7 @@ def get_cpu_power_policy() -> CpuPowerPolicy:
     return policy
 
 
-def _get_cuda_version() -> Optional[str]:
+def _get_cuda_version() -> str | None:
     """Return the CUDA version visible to this Python environment.
 
     Prefer Python-level inspection via PyTorch when available. If PyTorch is not
@@ -150,7 +131,8 @@ def _get_cuda_version() -> Optional[str]:
 
 
 def get_nvml_gpu_static_info(
-    pcie_devices: Optional[list[dict[str, object]]] = None,
+    pcie_devices: list[dict[str, object]] | None = None,
+    include_private_identifiers: bool = False,
 ) -> dict[str, object]:
     """Collect NVIDIA GPU static information through NVML.
 
@@ -197,7 +179,13 @@ def get_nvml_gpu_static_info(
             gpu_entry.update(nvml_static_metadata)
             if bus_address is not None:
                 gpu_entry["bus_address"] = bus_address
-            gpus.append(_format_pcie_device(gpu_entry, device_index))
+            gpus.append(
+                _format_pcie_device(
+                    gpu_entry,
+                    device_index,
+                    include_private_identifiers=include_private_identifiers,
+                )
+            )
     except Exception:
         return {}
     finally:
@@ -274,7 +262,7 @@ def _get_nvml_device_static_metadata(
     return metadata
 
 
-def _nvml_architecture_to_name(value: object) -> Optional[str]:
+def _nvml_architecture_to_name(value: object) -> str | None:
     """Return a stable NVIDIA architecture name for a pynvml architecture enum."""
     architecture = _to_int(value)
     if architecture is None:
@@ -308,9 +296,9 @@ def _remove_os_pcie_link_fields(device: dict[str, object]) -> None:
 
 def _find_matching_pcie_gpu(
     pcie_gpu_candidates: list[dict[str, object]],
-    bus_address: Optional[str],
+    bus_address: str | None,
     device_index: int,
-) -> Optional[dict[str, object]]:
+) -> dict[str, object] | None:
     if bus_address is not None:
         for candidate in pcie_gpu_candidates:
             candidate_bus_address = candidate.get("bus_address")
@@ -339,7 +327,7 @@ def _decode_nvml_string(value: object) -> str:
     return str(value)
 
 
-def _format_nvml_cuda_driver_version(value: object) -> Optional[str]:
+def _format_nvml_cuda_driver_version(value: object) -> str | None:
     version = _to_int(value)
     if version is None or version <= 0:
         return None
@@ -348,7 +336,7 @@ def _format_nvml_cuda_driver_version(value: object) -> Optional[str]:
     return f"{major}.{minor}"
 
 
-def _get_nvml_pci_bus_address(pynvml_module: object, handle: object) -> Optional[str]:
+def _get_nvml_pci_bus_address(pynvml_module: object, handle: object) -> str | None:
     try:
         pci_info = cast(Any, pynvml_module).nvmlDeviceGetPciInfo(handle)
     except Exception:
@@ -364,7 +352,7 @@ def _get_nvml_pci_bus_address(pynvml_module: object, handle: object) -> Optional
     return bus_id
 
 
-def _get_torch_cuda_version() -> Optional[str]:
+def _get_torch_cuda_version() -> str | None:
     try:
         import torch
     except ImportError:
@@ -377,7 +365,7 @@ def _get_torch_cuda_version() -> Optional[str]:
     return cuda_version or None
 
 
-def _parse_nvcc_cuda_version(output: str) -> Optional[str]:
+def _parse_nvcc_cuda_version(output: str) -> str | None:
     match = re.search(r"release\s+([0-9]+(?:\.[0-9]+)+)", output, re.IGNORECASE)
     if match is not None:
         return match.group(1)
@@ -388,7 +376,7 @@ def _parse_nvcc_cuda_version(output: str) -> Optional[str]:
     return None
 
 
-def _get_python_package_version(module_name: str) -> Optional[str]:
+def _get_python_package_version(module_name: str) -> str | None:
     """Return a best-effort Python package version for ``module_name``.
 
     Some runtime packages expose ``__version__`` while others rely on installed
@@ -416,7 +404,7 @@ def _get_python_package_version(module_name: str) -> Optional[str]:
         return None
 
 
-def get_cpu_governor() -> Optional[str]:
+def get_cpu_governor() -> str | None:
     """Return CPU frequency governor values as a compact string on Linux."""
     governors = []
     cpu_root = Path("/sys/devices/system/cpu")
@@ -485,7 +473,7 @@ def get_windows_power_policy() -> CpuPowerPolicy:
 
 
 def _normalize_windows_power_plan_name(
-    scheme_guid: Optional[str],
+    scheme_guid: str | None,
     power_plan: str,
 ) -> str:
     """Return a stable English name for built-in Windows power plans.
@@ -508,7 +496,7 @@ def _normalize_windows_power_plan_name(
 
 def _parse_windows_active_power_scheme(
     output: str,
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """Parse ``powercfg /getactivescheme`` output.
 
     The surrounding text is localized by Windows, but the GUID and plan name in
@@ -556,7 +544,7 @@ def _read_windows_power_setting_ac_value(
     scheme_guid: str,
     subgroup_guid: str,
     setting_guid: str,
-) -> Optional[int]:
+) -> int | None:
     output = run_command(
         ["powercfg", "/query", scheme_guid, subgroup_guid, setting_guid]
     )
@@ -565,7 +553,7 @@ def _read_windows_power_setting_ac_value(
     return _parse_windows_power_setting_ac_value(output)
 
 
-def _parse_windows_power_setting_ac_value(output: str) -> Optional[int]:
+def _parse_windows_power_setting_ac_value(output: str) -> int | None:
     """Parse an AC power setting value from ``powercfg /query`` output."""
     match = re.search(
         r"(?:Current AC Power Setting Index|현재\s*AC\s*전원\s*설정\s*인덱스)\s*:\s*0x([0-9a-f]+)",
@@ -583,8 +571,8 @@ def _parse_windows_power_setting_ac_value(output: str) -> Optional[int]:
         return None
 
 
-def _read_dram_dimms_windows() -> list[dict[str, object]]:
-    """Collect physical memory module information from Windows CIM."""
+def _read_dram_summary_windows() -> dict[str, object]:
+    """Collect privacy-safe DRAM aggregate information from Windows CIM."""
     output = run_command(
         [
             "powershell",
@@ -593,77 +581,84 @@ def _read_dram_dimms_windows() -> list[dict[str, object]]:
             "Bypass",
             "-Command",
             "Get-CimInstance Win32_PhysicalMemory | "
-            "Select-Object Manufacturer,PartNumber,SerialNumber,Capacity,Speed,"
+            "Select-Object Capacity,Speed,"
             "ConfiguredClockSpeed,DataWidth,TotalWidth,SMBIOSMemoryType | "
             "ConvertTo-Json -Depth 3",
         ]
     )
     if output is None:
-        return []
+        return {}
 
     try:
         parsed = json.loads(output)
     except json.JSONDecodeError:
-        return []
+        return {}
 
     if isinstance(parsed, dict):
         entries = [parsed]
     elif isinstance(parsed, list):
         entries = [entry for entry in parsed if isinstance(entry, dict)]
     else:
-        return []
+        return {}
 
-    dimms = []
+    modules = []
     for entry in entries:
-        dimm = {
-            "manufacturer": _clean_dram_string(entry.get("Manufacturer")),
-            "part_number": _clean_dram_string(entry.get("PartNumber")),
-            "serial_number": _clean_dram_string(entry.get("SerialNumber")),
+        module = {
             "capacity_bytes": _to_int(entry.get("Capacity")),
             "speed_mhz": _to_int(entry.get("Speed")),
             "configured_speed_mhz": _to_int(entry.get("ConfiguredClockSpeed")),
             "data_width_bits": _to_int(entry.get("DataWidth")),
             "total_width_bits": _to_int(entry.get("TotalWidth")),
-            "type": _windows_memory_type_to_text(entry.get("SMBIOSMemoryType")),
+            "ram_type": _windows_memory_type_to_text(entry.get("SMBIOSMemoryType")),
         }
-        cleaned = {key: value for key, value in dimm.items() if value is not None}
+        cleaned = {key: value for key, value in module.items() if value is not None}
         if cleaned:
-            dimms.append(cleaned)
-    return dimms
+            modules.append(cleaned)
+    return _summarize_dram_modules(modules)
 
 
-def _read_dram_dimms_linux(
-    sudo_password: Optional[str] = None,
-    sudo_password_provider: Optional[Callable[[], str]] = None,
-) -> list[dict[str, object]]:
-    """Collect physical memory module information from Linux dmidecode.
+def _summarize_dram_modules(
+    modules: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Collapse safe module-level DRAM performance fields into public aggregates."""
+    summary: dict[str, object] = {}
+    ram_type = _common_str(module.get("ram_type") for module in modules)
+    speed_mhz = _common_int(module.get("speed_mhz") for module in modules)
+    configured_speed_mhz = _common_int(
+        module.get("configured_speed_mhz") for module in modules
+    )
+    theoretical_bandwidth_gbps = _calculate_theoretical_bandwidth_gbps(modules)
+    if ram_type is not None:
+        summary["ram_type"] = ram_type
+    if speed_mhz is not None:
+        summary["speed_mhz"] = speed_mhz
+    if configured_speed_mhz is not None:
+        summary["configured_speed_mhz"] = configured_speed_mhz
+    if theoretical_bandwidth_gbps is not None:
+        summary["theoretical_bandwidth_gbps"] = theoretical_bandwidth_gbps
+    return summary
 
-    ``dmidecode`` normally requires root privileges. Try the direct command
-    first, then the best-effort non-interactive sudo fallback before asking for
-    any interactive password. When a sudo password is supplied, pass it to
-    ``sudo -S`` so callers can collect richer output without requiring users to
-    run the whole CLI through sudo. If all attempts fail, callers add a
-    permission note to the public output.
-    """
-    output = run_command(["dmidecode", "-t", "memory"])
-    if output is None:
-        output = run_command(["sudo", "-n", "dmidecode", "-t", "memory"])
-    if output is None:
-        if sudo_password is None and sudo_password_provider is not None:
-            sudo_password = sudo_password_provider()
-        if sudo_password is not None:
-            output = run_command_with_input(
-                ["sudo", "-S", "-p", "", "dmidecode", "-t", "memory"],
-                input_text=f"{sudo_password}\n",
-                timeout=30,
-            )
-    if output is None:
-        return []
-    return _parse_linux_dmidecode_memory(output)
+
+def _common_int(values: Sequence[object]) -> int | None:
+    ints = [_to_int(value) for value in values]
+    ints = [value for value in ints if value is not None]
+    if not ints:
+        return None
+    first = ints[0]
+    return first if all(value == first for value in ints) else None
+
+
+def _common_str(values: Sequence[object]) -> str | None:
+    strings = [str(value).strip() for value in values if isinstance(value, str)]
+    strings = [value for value in strings if value]
+    if not strings:
+        return None
+    first = strings[0]
+    return first if all(value == first for value in strings) else None
 
 
 def get_linux_npu_driver_firmware_info(
-    npu_devices: Optional[list[dict[str, object]]] = None,
+    npu_devices: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Collect Linux NPU driver/firmware metadata from mobilint-cli status."""
     if platform.system() != "Linux":
@@ -917,7 +912,7 @@ def _mobilint_query_device_to_static_info(
     return device
 
 
-def _mla400_static_card_id(dev_no: Optional[int], fallback_index: int) -> int:
+def _mla400_static_card_id(dev_no: int | None, fallback_index: int) -> int:
     """Return the logical MLA400 card id used by runtime metric grouping."""
     if dev_no is None:
         return fallback_index // 4
@@ -926,7 +921,7 @@ def _mla400_static_card_id(dev_no: Optional[int], fallback_index: int) -> int:
 
 def _classify_mobilint_query_card_model(
     raw_device: Mapping[str, object], device: Mapping[str, object]
-) -> Optional[str]:
+) -> str | None:
     power = raw_device.get("Power")
     if isinstance(power, Mapping) and "GOLDFINGER" in power:
         return "MLA400"
@@ -939,14 +934,14 @@ def _classify_mobilint_query_card_model(
     return None
 
 
-def _get_str(value: object) -> Optional[str]:
+def _get_str(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     value = value.strip()
     return value or None
 
 
-def _parse_mobilint_version_value(value: Optional[str]) -> Optional[str]:
+def _parse_mobilint_version_value(value: str | None) -> str | None:
     if value is None:
         return None
     if value.upper() == "N/A":
@@ -954,68 +949,28 @@ def _parse_mobilint_version_value(value: Optional[str]) -> Optional[str]:
     return value.split("(", 1)[0].strip() or None
 
 
-def _parse_mobilint_revision_value(value: Optional[str]) -> Optional[str]:
+def _parse_mobilint_revision_value(value: str | None) -> str | None:
     if value is None:
         return None
     match = re.search(r"Rev:\s*([^)\s]+)", value)
     return match.group(1) if match is not None else None
 
 
-def _parse_device_index(path: str) -> Optional[int]:
+def _parse_device_index(path: str) -> int | None:
     match = re.search(r"(\d+)$", path)
     return int(match.group(1)) if match is not None else None
 
 
-def _parse_number_from_unit_value(value: Optional[str]) -> Optional[float]:
+def _parse_number_from_unit_value(value: str | None) -> float | None:
     if value is None:
         return None
     match = re.search(r"[-+]?\d+(?:\.\d+)?", value)
     return float(match.group(0)) if match is not None else None
 
 
-def _parse_linux_dmidecode_memory(output: str) -> list[dict[str, object]]:
-    dimms = []
-    for section in re.split(r"\nHandle\s+", output):
-        if "Memory Device" not in section:
-            continue
-
-        fields = _parse_dmidecode_section_fields(section)
-        if fields.get("Size") in {None, "No Module Installed"}:
-            continue
-
-        dimm = {
-            "manufacturer": _clean_dram_string(fields.get("Manufacturer")),
-            "part_number": _clean_dram_string(fields.get("Part Number")),
-            "serial_number": _clean_dram_string(fields.get("Serial Number")),
-            "capacity_bytes": _parse_memory_size_to_bytes(fields.get("Size")),
-            "speed_mhz": _parse_memory_speed_to_mhz(fields.get("Speed")),
-            "configured_speed_mhz": _parse_memory_speed_to_mhz(
-                fields.get("Configured Memory Speed")
-            ),
-            "data_width_bits": _parse_memory_width_to_bits(fields.get("Data Width")),
-            "total_width_bits": _parse_memory_width_to_bits(fields.get("Total Width")),
-            "type": _clean_dram_string(fields.get("Type")),
-        }
-        cleaned = {key: value for key, value in dimm.items() if value is not None}
-        if cleaned:
-            dimms.append(cleaned)
-    return dimms
-
-
-def _parse_dmidecode_section_fields(section: str) -> dict[str, str]:
-    fields = {}
-    for line in section.splitlines():
-        if ":" not in line:
-            continue
-        key, value = [part.strip() for part in line.split(":", 1)]
-        if key:
-            fields[key] = value
-    return fields
-
-
 def _calculate_theoretical_bandwidth_gbps(
     dimms: Sequence[Mapping[str, object]],
-) -> Optional[float]:
+) -> float | None:
     """Estimate peak DRAM bandwidth in GB/s from DIMM speed and data width."""
     bandwidth_gbps = 0.0
     for dimm in dimms:
@@ -1032,7 +987,7 @@ def _calculate_theoretical_bandwidth_gbps(
     return round(bandwidth_gbps, 2)
 
 
-def _windows_memory_type_to_text(value: object) -> Optional[str]:
+def _windows_memory_type_to_text(value: object) -> str | None:
     memory_type = _to_int(value)
     if memory_type is None:
         return None
@@ -1046,57 +1001,7 @@ def _windows_memory_type_to_text(value: object) -> Optional[str]:
     return memory_types.get(memory_type)
 
 
-def _parse_memory_size_to_bytes(value: Optional[str]) -> Optional[int]:
-    if value is None:
-        return None
-    match = re.search(r"([0-9]+)\s*([KMGT]B)", value, re.IGNORECASE)
-    if match is None:
-        return None
-    amount = int(match.group(1))
-    unit = match.group(2).upper()
-    multipliers = {
-        "KB": 1024,
-        "MB": 1024**2,
-        "GB": 1024**3,
-        "TB": 1024**4,
-    }
-    return amount * multipliers[unit]
-
-
-def _parse_memory_speed_to_mhz(value: Optional[str]) -> Optional[int]:
-    if value is None or value.strip().lower() == "unknown":
-        return None
-    match = re.search(r"([0-9]+)", value)
-    if match is None:
-        return None
-    return int(match.group(1))
-
-
-def _parse_memory_width_to_bits(value: Optional[str]) -> Optional[int]:
-    if value is None or value.strip().lower() == "unknown":
-        return None
-    match = re.search(r"([0-9]+)", value)
-    if match is None:
-        return None
-    return int(match.group(1))
-
-
-def _clean_dram_string(value: object) -> Optional[str]:
-    if not isinstance(value, str):
-        return None
-    value = value.strip()
-    if not value or value.lower() in {
-        "unknown",
-        "not specified",
-        "not provided",
-        "none",
-        "to be filled by o.e.m.",
-    }:
-        return None
-    return value
-
-
-def _to_int(value: object) -> Optional[int]:
+def _to_int(value: object) -> int | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
@@ -1113,11 +1018,12 @@ def _to_int(value: object) -> Optional[int]:
 
 
 def get_pcie_static_info(
-    vendor_id: Optional[str] = None,
-    device_id: Optional[str] = None,
-    class_filter: Optional[str] = None,
+    vendor_id: str | None = None,
+    device_id: str | None = None,
+    class_filter: str | None = None,
     include_all_devices: bool = False,
-    devices: Optional[list[dict[str, object]]] = None,
+    devices: list[dict[str, object]] | None = None,
+    include_private_identifiers: bool = False,
 ) -> dict[str, object]:
     """Collect best-effort PCIe information.
 
@@ -1138,12 +1044,23 @@ def get_pcie_static_info(
         devices = get_all_pcie_devices()
     hardware_info: dict[str, object] = {}
     if include_all_devices:
-        hardware_info["pcie_devices"] = devices
+        hardware_info["pcie_devices"] = [
+            _format_pcie_device(
+                device,
+                dev_no,
+                include_private_identifiers=include_private_identifiers,
+            )
+            for dev_no, device in enumerate(devices)
+        ]
     gpus = _find_all_gpu_devices(devices)
     if gpus:
         gpu_device_indices = _get_gpu_device_indices(devices)
         hardware_info["gpus"] = [
-            _format_pcie_device(device, gpu_device_indices.get(id(device), dev_no))
+            _format_pcie_device(
+                device,
+                gpu_device_indices.get(id(device), dev_no),
+                include_private_identifiers=include_private_identifiers,
+            )
             for dev_no, device in enumerate(gpus)
         ]
     npus = _find_all_npu_devices(devices, vendor_id, device_id, class_filter)
@@ -1151,7 +1068,11 @@ def get_pcie_static_info(
     if npus:
         npu_device_indices = _get_npu_device_indices(devices)
         formatted_npus = [
-            _format_pcie_device(device, npu_device_indices.get(id(device), dev_no))
+            _format_pcie_device(
+                device,
+                npu_device_indices.get(id(device), dev_no),
+                include_private_identifiers=include_private_identifiers,
+            )
             for dev_no, device in enumerate(npus)
         ]
         npu_driver_version = _pop_npu_driver_version(formatted_npus)
@@ -1196,7 +1117,7 @@ def get_all_pcie_devices() -> list[dict[str, object]]:
     return _read_pcie_devices(Path("/sys/bus/pci/devices"))
 
 
-def _pop_npu_driver_version(npus: list[dict[str, object]]) -> Optional[str]:
+def _pop_npu_driver_version(npus: list[dict[str, object]]) -> str | None:
     npu_driver_version = None
     for npu in npus:
         driver_version = npu.pop("driver_version", None)
@@ -1278,7 +1199,7 @@ def _read_pcie_devices_windows() -> list[dict[str, object]]:
 
 
 def _read_windows_pci_link_properties(
-    instance_ids: Optional[list[str]] = None,
+    instance_ids: list[str] | None = None,
 ) -> dict[str, dict[str, object]]:
     """Read PCIe/PnP properties for selected Windows PCI devices.
 
@@ -1422,10 +1343,10 @@ def _windows_pci_auxiliary_ids(entity: Mapping[str, object]) -> list[str]:
 
 def get_windows_npu_driver_firmware_info(
     vendor_ids: tuple[str, ...] = ("1ed5", "209f"),
-    vendor_id: Optional[str] = None,
-    device_id: Optional[str] = None,
-    class_filter: Optional[str] = None,
-    devices: Optional[list[dict[str, object]]] = None,
+    vendor_id: str | None = None,
+    device_id: str | None = None,
+    class_filter: str | None = None,
+    devices: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Collect Windows NPU driver metadata from PnP properties.
 
@@ -1476,7 +1397,7 @@ def get_windows_npu_driver_firmware_info(
     return info
 
 
-def _clean_windows_device_property(value: object) -> Optional[str]:
+def _clean_windows_device_property(value: object) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
@@ -1485,7 +1406,7 @@ def _clean_windows_device_property(value: object) -> Optional[str]:
     return str(value)
 
 
-def _windows_link_speed_to_text(value: object) -> Optional[str]:
+def _windows_link_speed_to_text(value: object) -> str | None:
     if not isinstance(value, (int, str)):
         return None
     try:
@@ -1506,14 +1427,14 @@ def _windows_link_speed_to_text(value: object) -> Optional[str]:
 
 def _parse_windows_pci_id(
     pnp_device_id: str,
-    auxiliary_ids: Optional[Sequence[str]] = None,
-) -> Optional[dict[str, object]]:
+    auxiliary_ids: Sequence[str] | None = None,
+) -> dict[str, object] | None:
     if not pnp_device_id.upper().startswith("PCI\\"):
         return None
 
     pci_ids = [pnp_device_id, *(auxiliary_ids or [])]
 
-    def match_hex(pattern: str, values: Sequence[str] = pci_ids) -> Optional[str]:
+    def match_hex(pattern: str, values: Sequence[str] = pci_ids) -> str | None:
         for value in values:
             match = re.search(pattern, value, re.IGNORECASE)
             if match is not None:
@@ -1546,7 +1467,7 @@ def _parse_windows_pci_id(
     return device
 
 
-def _match_windows_pci_class_code(pci_ids: Sequence[str]) -> Optional[str]:
+def _match_windows_pci_class_code(pci_ids: Sequence[str]) -> str | None:
     class_codes = []
     for pci_id in pci_ids:
         for match in re.finditer(r"CC_([0-9A-F]{2,6})", pci_id, re.IGNORECASE):
@@ -1623,7 +1544,7 @@ def _read_lspci_device_metadata() -> dict[str, dict[str, object]]:
     return metadata
 
 
-def _strip_lspci_numeric_suffix(value: str) -> Optional[str]:
+def _strip_lspci_numeric_suffix(value: str) -> str | None:
     value = re.sub(r"\s*\[[0-9a-fA-F]{4,6}\]\s*$", "", value).strip()
     return value or None
 
@@ -1631,7 +1552,7 @@ def _strip_lspci_numeric_suffix(value: str) -> Optional[str]:
 def _linux_known_pcie_metadata(device: dict[str, object]) -> dict[str, object]:
     vendor = _normalize_hex(str(device.get("vendor_id", "")))
     device_id = _normalize_hex(str(device.get("device_id", "")))
-    known: dict[tuple[str, Optional[str]], dict[str, object]] = {
+    known: dict[tuple[str, str | None], dict[str, object]] = {
         ("209f", None): {
             "manufacturer": "MOBILINT, Inc.",
             "name": "MOBILINT NPU Accelerator",
@@ -1660,9 +1581,9 @@ def _is_generic_lspci_label(value: str) -> bool:
 
 def _find_all_npu_devices(
     devices: list[dict[str, object]],
-    vendor_id: Optional[str],
-    device_id: Optional[str],
-    class_filter: Optional[str],
+    vendor_id: str | None,
+    device_id: str | None,
+    class_filter: str | None,
 ) -> list[dict[str, object]]:
     normalized_vendor_id = _normalize_hex(vendor_id)
     normalized_device_id = _normalize_hex(device_id)
@@ -1699,10 +1620,13 @@ def _find_all_gpu_devices(devices: list[dict[str, object]]) -> list[dict[str, ob
     return [device for device in devices if _is_likely_gpu_device(device)]
 
 
-def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, object]:
+def _format_pcie_device(
+    device: dict[str, object],
+    dev_no: int,
+    include_private_identifiers: bool = False,
+) -> dict[str, object]:
     formatted: dict[str, object] = {"dev_no": dev_no}
-    for key in (
-        "bus_address",
+    public_keys = (
         "vendor_id",
         "device_id",
         "subsystem_vendor_id",
@@ -1711,7 +1635,6 @@ def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, obj
         "name",
         "manufacturer",
         "status",
-        "pnp_device_id",
         "revision",
         "driver_version",
         "driver_name",
@@ -1727,7 +1650,9 @@ def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, obj
         "max_link_width",
         "memory_total_bytes",
         "architecture",
-    ):
+    )
+    private_keys = ("bus_address", "pnp_device_id") if include_private_identifiers else ()
+    for key in (*private_keys, *public_keys):
         if device.get(key) is not None:
             formatted[key] = device[key]
 
@@ -1742,6 +1667,38 @@ def _format_pcie_device(device: dict[str, object], dev_no: int) -> dict[str, obj
     elif device.get("current_link_width") is not None:
         formatted["lane_width"] = f"x{device['current_link_width']}"
     return formatted
+
+
+def _sanitize_pcie_device_for_public_output(
+    device: Mapping[str, object],
+) -> dict[str, object]:
+    """Return a copy of a PCIe device without private instance identifiers."""
+    return {
+        key: value
+        for key, value in device.items()
+        if key not in {"bus_address", "pnp_device_id"}
+    }
+
+
+def _sanitize_static_info_for_public_output(info: dict[str, object]) -> dict[str, object]:
+    """Remove private/static legacy fields from public static-info output."""
+    sanitized = _sanitize_value_for_public_output(info)
+    return sanitized if isinstance(sanitized, dict) else {}
+
+
+def _sanitize_value_for_public_output(value: object) -> object:
+    if isinstance(value, dict):
+        cleaned: dict[str, object] = {}
+        for key, item in value.items():
+            if key in {"bus_address", "pnp_device_id", "dimms_collection_note"}:
+                continue
+            if key == "dimms":
+                continue
+            cleaned[key] = _sanitize_value_for_public_output(item)
+        return cleaned
+    if isinstance(value, list):
+        return [_sanitize_value_for_public_output(item) for item in value]
+    return value
 
 
 def _filter_relevant_pcie_devices(
@@ -1870,7 +1827,7 @@ def _is_likely_npu_device(device: dict[str, object]) -> bool:
     return "mobilint" in text or "npu" in text
 
 
-def _read_first_line(path: Path) -> Optional[str]:
+def _read_first_line(path: Path) -> str | None:
     try:
         value = path.read_text(encoding="utf-8").splitlines()[0].strip()
     except (OSError, IndexError):
@@ -1878,7 +1835,7 @@ def _read_first_line(path: Path) -> Optional[str]:
     return value or None
 
 
-def _normalize_hex(value: Optional[str]) -> Optional[str]:
+def _normalize_hex(value: str | None) -> str | None:
     if value is None:
         return None
     value = value.strip().lower()
@@ -1890,8 +1847,8 @@ def _normalize_hex(value: Optional[str]) -> Optional[str]:
 
 
 def _deep_merge(
-    base: Union[dict[str, object], object], overlay: Union[dict[str, object], object]
-) -> Union[dict[str, object], object]:
+    base: dict[str, object] | object, overlay: dict[str, object] | object
+) -> dict[str, object] | object:
     """Recursively merge nested dictionaries and return ``base``."""
     if not isinstance(base, dict) or not isinstance(overlay, dict):
         return base
@@ -1952,7 +1909,7 @@ def _device_identity_matches(
     return False
 
 
-def _clean_typed_dict(value: object, schema: Optional[object] = None) -> object:
+def _clean_typed_dict(value: object, schema: object | None = None) -> object:
     """Remove None from optional fields while preserving required schema keys."""
     if isinstance(value, dict):
         required_keys = getattr(schema, "__required_keys__", frozenset())
@@ -1977,7 +1934,7 @@ def _remove_none_values(value: object) -> object:
     return _clean_typed_dict(value)
 
 
-def _link_speed_to_generation(link_speed: str) -> Optional[str]:
+def _link_speed_to_generation(link_speed: str) -> str | None:
     match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*GT/s", link_speed, re.IGNORECASE)
     if match is None:
         return None
@@ -1997,7 +1954,7 @@ def _link_speed_to_generation(link_speed: str) -> Optional[str]:
     return None
 
 
-def _linux_cpu_identity() -> tuple[Optional[str], Optional[str]]:
+def _linux_cpu_identity() -> tuple[str | None, str | None]:
     cpuinfo = Path("/proc/cpuinfo")
     try:
         lines = cpuinfo.read_text(encoding="utf-8", errors="ignore").splitlines()
@@ -2018,7 +1975,7 @@ def _linux_cpu_identity() -> tuple[Optional[str], Optional[str]]:
     return model_name, vendor
 
 
-def _windows_cpu_identity() -> tuple[Optional[str], Optional[str]]:
+def _windows_cpu_identity() -> tuple[str | None, str | None]:
     """Return Windows CPU brand string and vendor from the registry.
 
     ``platform.processor()`` often returns a low-level CPUID descriptor such as
@@ -2052,7 +2009,7 @@ def _windows_cpu_identity() -> tuple[Optional[str], Optional[str]]:
     return model_name, vendor
 
 
-def _read_windows_registry_string(winreg_module: object, key: object, name: str) -> Optional[str]:
+def _read_windows_registry_string(winreg_module: object, key: object, name: str) -> str | None:
     try:
         value, _value_type = cast(Any, winreg_module).QueryValueEx(key, name)
     except OSError:
@@ -2077,12 +2034,12 @@ def _read_os_release() -> dict[str, str]:
     return values
 
 
-def run_command(command: list[str]) -> Optional[str]:
+def run_command(command: list[str]) -> str | None:
     """Run a command and return stdout on success."""
     return run_command_with_timeout(command, timeout=5)
 
 
-def run_command_with_timeout(command: list[str], timeout: int) -> Optional[str]:
+def run_command_with_timeout(command: list[str], timeout: int) -> str | None:
     """Run a command and return stdout on success."""
     try:
         result = subprocess.run(
@@ -2103,7 +2060,7 @@ def run_command_with_input(
     command: list[str],
     input_text: str,
     timeout: int,
-) -> Optional[str]:
+) -> str | None:
     """Run a command with stdin input and return stdout on success."""
     try:
         result = subprocess.run(

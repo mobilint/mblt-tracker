@@ -739,12 +739,17 @@ def test_npu_get_static_info_uses_mobilint_pci_vendor_by_default(monkeypatch) ->
     pcie_devices = []
 
     def fake_get_pcie_static_info(
-        vendor_id=None, device_id=None, class_filter=None, devices=None
+        vendor_id=None,
+        device_id=None,
+        class_filter=None,
+        devices=None,
+        include_private_identifiers=False,
     ):
         captured["vendor_id"] = vendor_id
         captured["device_id"] = device_id
         captured["class_filter"] = class_filter
         captured["devices"] = devices
+        captured["include_private_identifiers"] = include_private_identifiers
         return {"hardware": {"pcie": {"devices": []}}}
 
     monkeypatch.setattr(
@@ -769,6 +774,7 @@ def test_npu_get_static_info_uses_mobilint_pci_vendor_by_default(monkeypatch) ->
         "device_id": None,
         "class_filter": None,
         "devices": pcie_devices,
+        "include_private_identifiers": True,
     }
 
 
@@ -787,7 +793,11 @@ def test_npu_get_static_info_uses_windows_pnp_metadata_without_mobilint_cli(
     )
     monkeypatch.setattr(
         "mblt_tracker.device_tracker_npu.get_pcie_static_info",
-        lambda vendor_id=None, device_id=None, class_filter=None, devices=None: {
+        lambda vendor_id=None,
+        device_id=None,
+        class_filter=None,
+        devices=None,
+        include_private_identifiers=False: {
             "hardware": {"npus": [{"vendor_id": "0x209f"}]}
         },
     )
@@ -872,9 +882,15 @@ def test_npu_get_static_info_passes_filters_and_devices_to_windows_metadata(
         "device_id": "0100",
         "class_filter": "0x12",
         "devices": pcie_devices,
+        "include_private_identifiers": True,
     }
     assert captured_pcie == expected
-    assert captured_windows == expected
+    assert captured_windows == {
+        "vendor_id": "1ed5",
+        "device_id": "0100",
+        "class_filter": "0x12",
+        "devices": pcie_devices,
+    }
 
 
 def test_npu_get_static_info_preserves_filtered_pcie_npus_when_merging_status(
@@ -897,7 +913,11 @@ Drivers - Aries: 1.8.1 Regulus: 1.12.0 |
     )
     monkeypatch.setattr(
         "mblt_tracker.device_tracker_npu.get_pcie_static_info",
-        lambda vendor_id=None, device_id=None, class_filter=None, devices=None: {
+        lambda vendor_id=None,
+        device_id=None,
+        class_filter=None,
+        devices=None,
+        include_private_identifiers=False: {
             "hardware": {
                 "npus": [
                     {
@@ -919,7 +939,6 @@ Drivers - Aries: 1.8.1 Regulus: 1.12.0 |
     assert info["hardware"]["npus"] == [
         {
             "dev_no": 1,
-            "bus_address": "0000:02:00.0",
             "vendor_id": "0x209f",
             "board_name": "Board-B",
             "firmware": {"version": "2.0.2"},
