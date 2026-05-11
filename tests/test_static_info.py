@@ -1,3 +1,4 @@
+# ruff: noqa: N802, N815
 from __future__ import annotations
 
 import json
@@ -12,18 +13,18 @@ from mblt_tracker.static_info import (
     _format_nvml_cuda_driver_version,
     _get_cuda_version,
     _get_python_package_version,
-    get_cpu_power_policy,
-    get_host_static_info,
-    get_nvml_gpu_static_info,
-    get_linux_npu_driver_firmware_info,
-    _parse_nvcc_cuda_version,
-    _read_windows_pci_link_properties,
     _normalize_windows_power_plan_name,
+    _parse_nvcc_cuda_version,
     _parse_windows_active_power_scheme,
     _parse_windows_pci_id,
     _parse_windows_power_setting_ac_value,
-    _read_lspci_device_metadata,
     _read_dram_summary_windows,
+    _read_lspci_device_metadata,
+    _read_windows_pci_link_properties,
+    get_cpu_power_policy,
+    get_host_static_info,
+    get_linux_npu_driver_firmware_info,
+    get_nvml_gpu_static_info,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
     get_windows_power_policy,

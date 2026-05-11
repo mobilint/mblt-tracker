@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 
 class CpuHardwareInfo(TypedDict):
     architecture: str
-    physical_cores: Optional[int]
-    logical_cores: Optional[int]
-    model_name: Optional[str]
-    vendor: Optional[str]
+    physical_cores: int | None
+    logical_cores: int | None
+    model_name: str | None
+    vendor: str | None
 
 
 class DramInfo(TypedDict):
@@ -24,14 +24,14 @@ class DramInfoOptional(DramInfo, total=False):
 
 
 class CpuPowerPolicy(TypedDict):
-    governor: Optional[str]
-    power_plan: Optional[str]
-    min_processor_state_pct: Optional[int]
-    max_processor_state_pct: Optional[int]
+    governor: str | None
+    power_plan: str | None
+    min_processor_state_pct: int | None
+    max_processor_state_pct: int | None
 
 
 class VersionInfo(TypedDict):
-    version: Optional[str]
+    version: str | None
 
 
 class OsInfo(TypedDict):
@@ -41,12 +41,12 @@ class OsInfo(TypedDict):
 
 
 class NpuDriverInfo(TypedDict):
-    aries_version: Optional[str]
-    regulus_version: Optional[str]
+    aries_version: str | None
+    regulus_version: str | None
 
 
 class NpuFirmwareInfo(TypedDict):
-    version: Optional[str]
+    version: str | None
 
 
 class GpuStaticDeviceInfo(TypedDict):
@@ -55,7 +55,7 @@ class GpuStaticDeviceInfo(TypedDict):
 
 
 class GpuHardwareInfo(TypedDict):
-    device_count: Optional[int]
+    device_count: int | None
 
 
 class GpuHardwareInfoOptional(GpuHardwareInfo, total=False):

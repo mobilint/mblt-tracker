@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import pytest
 
 from mblt_tracker.device_tracker_dram import DRAMDeviceTracker
 
 
 class _FakeResult:
-    def __init__(self, duration: float, dram: Optional[list[float]]):
+    def __init__(self, duration: float, dram: list[float] | None):
         self.duration = duration
         self.dram = dram
 

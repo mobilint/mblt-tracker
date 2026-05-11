@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional, Sequence, TextIO, cast
+from typing import Any, Callable, TextIO, cast
 
 from ._types import CollectOutput
 from .static_info import (
@@ -13,8 +14,8 @@ from .static_info import (
     _remove_os_pcie_link_fields,
     _sanitize_static_info_for_public_output,
     get_all_pcie_devices,
-    get_linux_npu_driver_firmware_info,
     get_host_static_info,
+    get_linux_npu_driver_firmware_info,
     get_nvml_gpu_static_info,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
@@ -22,12 +23,12 @@ from .static_info import (
 
 
 def collect_static_info(
-    pcie_vendor_id: Optional[str] = None,
-    pcie_device_id: Optional[str] = None,
-    pcie_class_filter: Optional[str] = None,
+    pcie_vendor_id: str | None = None,
+    pcie_device_id: str | None = None,
+    pcie_class_filter: str | None = None,
     all_pcie_devices: bool = False,
-    sudo_password: Optional[str] = None,
-    sudo_password_provider: Optional[Callable[[], str]] = None,
+    sudo_password: str | None = None,
+    sudo_password_provider: Callable[[], str] | None = None,
 ) -> CollectOutput:
     """Collect best-effort static host and PCIe information."""
     info = cast(
@@ -80,7 +81,7 @@ def collect_static_info(
 
 
 def _has_pcie_filter(
-    vendor_id: Optional[str], device_id: Optional[str], class_filter: Optional[str]
+    vendor_id: str | None, device_id: str | None, class_filter: str | None
 ) -> bool:
     return any(value is not None for value in (vendor_id, device_id, class_filter))
 
@@ -126,7 +127,7 @@ def _find_matching_base_gpu_for_overlay(
     base_gpus: list[dict[str, object]],
     overlay_gpu: dict[str, object],
     overlay_index: int,
-) -> Optional[dict[str, object]]:
+) -> dict[str, object] | None:
     overlay_has_identity = _has_device_identity(overlay_gpu)
     overlay_key = overlay_gpu.get("dev_no", overlay_index)
     for base_index, base_gpu in enumerate(base_gpus):
@@ -158,11 +159,11 @@ def _device_identity_matches(
 
 
 def _collect_windows_npu_metadata(
-    vendor_id: Optional[str],
-    device_id: Optional[str],
-    class_filter: Optional[str],
+    vendor_id: str | None,
+    device_id: str | None,
+    class_filter: str | None,
     devices: list[dict[str, object]],
-    filtered_npus: Optional[list[dict[str, object]]],
+    filtered_npus: list[dict[str, object]] | None,
 ) -> dict[str, object]:
     if filtered_npus == []:
         return {}
@@ -175,7 +176,7 @@ def _collect_windows_npu_metadata(
 
 
 def _collect_linux_npu_metadata(
-    filtered_npus: Optional[list[dict[str, object]]],
+    filtered_npus: list[dict[str, object]] | None,
 ) -> dict[str, object]:
     if filtered_npus == []:
         return {}
@@ -223,7 +224,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _write_json(info: Mapping[str, object], output: Optional[Path], stdout: TextIO) -> None:
+def _write_json(info: Mapping[str, object], output: Path | None, stdout: TextIO) -> None:
     text = json.dumps(cast(Any, info), indent=2, sort_keys=True) + "\n"
     if output is None:
         stdout.write(text)
@@ -232,7 +233,7 @@ def _write_json(info: Mapping[str, object], output: Optional[Path], stdout: Text
     output.write_text(text, encoding="utf-8")
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
