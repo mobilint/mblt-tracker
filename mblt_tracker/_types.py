@@ -5,16 +5,12 @@ from typing import TypedDict
 
 class _CpuHardwareInfoRequired(TypedDict):
     architecture: str
-    physical_cores: int | None
-    logical_cores: int | None
     model_name: str | None
     vendor: str | None
 
 
-class CpuHardwareInfo(_CpuHardwareInfoRequired, total=False):
-    base_clock_mhz: int
-    boost_clock_mhz: int
-    max_clock_mhz: int
+class CpuHardwareInfo(_CpuHardwareInfoRequired):
+    pass
 
 
 class DramInfo(TypedDict):
@@ -133,22 +129,10 @@ class NpuDeviceInfo(PcieDeviceInfo, total=False):
     firmware: NpuFirmwareInfo
 
 
-class MotherboardPcieSlotInfo(TypedDict, total=False):
-    designation: str
-    slot_type: str
-    current_usage: str
-    length: str
-    data_bus_width: str
-    link_generation: str
-    lane_width: str
-    status: str
-
-
 class MotherboardPcieInfo(TypedDict, total=False):
     max_link_generation: str
     max_link_speed: str
     max_lane_width: str
-    slots: list[MotherboardPcieSlotInfo]
 
 
 class MotherboardInfo(TypedDict, total=False):
@@ -204,7 +188,6 @@ STATIC_INFO_CHILD_SCHEMAS: dict[type, dict[str, object]] = {
     },
     DramInfoOptional: {"modules": [DramModuleInfo]},
     MotherboardInfo: {"pcie": MotherboardPcieInfo},
-    MotherboardPcieInfo: {"slots": [MotherboardPcieSlotInfo]},
     GpuHardwareInfoOptional: {"devices": [GpuStaticDeviceInfo]},
     InferenceInfo: {
         "cpu": CpuPowerPolicy,
