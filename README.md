@@ -129,26 +129,28 @@ interpret.
 
 ```bash
 $ mblt-tracker collect
-WARNING:root:imports error
- You need to install pymongo>=3.9.0 in order to use MongoOutput
-WARNING:root:imports error
-  You need to install pandas>=0.25.1 in order to use DataFrameOutput
+WARNING:root:imports error 
+ You need to install pymongo>=3.9.0 in order to use MongoOutput 
+WARNING:root:imports error 
+  You need to install pandas>=0.25.1 in order to use DataFrameOutput 
 {
   "hardware": {
     "cpu": {
       "architecture": "AMD64",
-      "logical_cores": 20,
       "model_name": "13th Gen Intel(R) Core(TM) i5-13500",
-      "physical_cores": 14,
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 15008358400,
+      "available_bytes": 15580520448,
+      "available_gb": 14.51,
+      "available_mb": 14858.74,
       "configured_speed_mhz": 5600,
       "module_count": 2,
       "modules": [
         {
           "capacity_bytes": 17179869184,
+          "capacity_gb": 16.0,
+          "capacity_mb": 16384.0,
           "configured_speed_mhz": 5600,
           "data_width_bits": 64,
           "ram_type": "DDR5",
@@ -158,6 +160,8 @@ WARNING:root:imports error
         },
         {
           "capacity_bytes": 17179869184,
+          "capacity_gb": 16.0,
+          "capacity_mb": 16384.0,
           "configured_speed_mhz": 5600,
           "data_width_bits": 64,
           "ram_type": "DDR5",
@@ -169,7 +173,9 @@ WARNING:root:imports error
       "ram_type": "DDR5",
       "speed_mhz": 5600,
       "theoretical_bandwidth_gbps": 89.6,
-      "total_bytes": 34113015808
+      "total_bytes": 34113015808,
+      "total_gb": 31.77,
+      "total_mb": 32532.71
     },
     "gpus": [
       {
@@ -198,8 +204,10 @@ WARNING:root:imports error
         "driver_provider": "NVIDIA",
         "driver_version": "595.97",
         "lane_width": "x4",
-        "link_generation": "Gen1",
+        "link_generation": "Gen2",
         "manufacturer": "NVIDIA",
+        "max_lane_width": "x16",
+        "max_link_generation": "Gen4",
         "memory_total_bytes": 25769803776,
         "name": "NVIDIA GeForce RTX 3090",
         "revision": "0xa1",
@@ -209,6 +217,17 @@ WARNING:root:imports error
         "vendor_id": "0x10de"
       }
     ],
+    "motherboard": {
+      "chipset": "INTEL Intel(R) SMBus - 7A23",
+      "manufacturer": "Micro-Star International Co., Ltd.",
+      "model_name": "MAG B760 TOMAHAWK WIFI (MS-7D96)",
+      "pcie": {
+        "max_lane_width": "x16",
+        "max_link_generation": "Gen4",
+        "max_link_speed": "16.0 GT/s PCIe"
+      },
+      "version": "2.0"
+    },
     "npus": [
       {
         "class": "0x078000",
@@ -222,6 +241,8 @@ WARNING:root:imports error
         "lane_width": "x8",
         "link_generation": "Gen4",
         "manufacturer": "MOBILINT, Inc.",
+        "max_lane_width": "x8",
+        "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "name": "MOBILINT NPU Accelerator",
@@ -279,14 +300,16 @@ WARNING:root:imports error
   "hardware": {
     "cpu": {
       "architecture": "x86_64",
-      "logical_cores": 96,
       "model_name": "INTEL(R) XEON(R) GOLD 6542Y",
-      "physical_cores": 48,
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 321193263104,
-      "total_bytes": 405389791232
+      "available_bytes": 335025516544,
+      "available_gb": 312.02,
+      "available_mb": 319505.23,
+      "total_bytes": 405389791232,
+      "total_gb": 377.55,
+      "total_mb": 386609.83
     },
     "gpus": [
       {
@@ -309,6 +332,8 @@ WARNING:root:imports error
         "lane_width": "x16",
         "link_generation": "Gen1",
         "manufacturer": "NVIDIA Corporation",
+        "max_lane_width": "x16",
+        "max_link_generation": "Gen5",
         "memory_total_bytes": 102641958912,
         "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
         "revision": "0xa1",
@@ -323,8 +348,10 @@ WARNING:root:imports error
         "device_id": "0x2bb1",
         "driver_version": "580.95.05",
         "lane_width": "x16",
-        "link_generation": "Gen5",
+        "link_generation": "Gen1",
         "manufacturer": "NVIDIA Corporation",
+        "max_lane_width": "x16",
+        "max_link_generation": "Gen5",
         "memory_total_bytes": 102641958912,
         "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
         "revision": "0xa1",
@@ -333,6 +360,14 @@ WARNING:root:imports error
         "vendor_id": "0x10de"
       }
     ],
+    "motherboard": {
+      "chipset": "Intel Corporation Device",
+      "pcie": {
+        "max_lane_width": "x255",
+        "max_link_generation": "Gen5",
+        "max_link_speed": "32.0 GT/s PCIe"
+      }
+    },
     "npus": [
       {
         "board_name": "aries0",
@@ -350,6 +385,8 @@ WARNING:root:imports error
         "lane_width": "8",
         "link_generation": "4",
         "manufacturer": "Mobilint, Inc.",
+        "max_lane_width": "x8",
+        "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
@@ -413,14 +450,24 @@ Warning: NVML not available. GPU information will not be collected.
   "hardware": {
     "cpu": {
       "architecture": "x86_64",
-      "logical_cores": 16,
       "model_name": "11th Gen Intel(R) Core(TM) i7-11700K @ 3.60GHz",
-      "physical_cores": 8,
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 15901192192,
-      "total_bytes": 67178881024
+      "available_bytes": 40428683264,
+      "available_gb": 37.65,
+      "available_mb": 38555.8,
+      "total_bytes": 67178881024,
+      "total_gb": 62.57,
+      "total_mb": 64066.77
+    },
+    "motherboard": {
+      "chipset": "Intel Corporation Device",
+      "pcie": {
+        "max_lane_width": "x255",
+        "max_link_generation": "Gen5",
+        "max_link_speed": "32.0 GT/s PCIe"
+      }
     },
     "npus": [
       {
@@ -439,6 +486,8 @@ Warning: NVML not available. GPU information will not be collected.
         "lane_width": "8",
         "link_generation": "4",
         "manufacturer": "Mobilint, Inc.",
+        "max_lane_width": "x8",
+        "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
@@ -465,6 +514,8 @@ Warning: NVML not available. GPU information will not be collected.
         "lane_width": "8",
         "link_generation": "4",
         "manufacturer": "Mobilint, Inc.",
+        "max_lane_width": "x8",
+        "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
@@ -491,6 +542,8 @@ Warning: NVML not available. GPU information will not be collected.
         "lane_width": "8",
         "link_generation": "4",
         "manufacturer": "Mobilint, Inc.",
+        "max_lane_width": "x8",
+        "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
@@ -517,6 +570,8 @@ Warning: NVML not available. GPU information will not be collected.
         "lane_width": "8",
         "link_generation": "4",
         "manufacturer": "Mobilint, Inc.",
+        "max_lane_width": "x8",
+        "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
@@ -531,7 +586,7 @@ Warning: NVML not available. GPU information will not be collected.
   },
   "inference": {
     "cpu": {
-      "governor": "powersave",
+      "governor": "performance",
       "max_processor_state_pct": null,
       "min_processor_state_pct": null,
       "power_plan": null
@@ -540,10 +595,10 @@ Warning: NVML not available. GPU information will not be collected.
       "version": "12.8"
     },
     "driver": {
-      "aries_version": "1.12.0",
+      "aries_version": "1.12.1",
       "regulus_version": "N/A"
     },
-    "npu_driver_version": "1.12.0",
+    "npu_driver_version": "1.12.1",
     "os": {
       "kernel_version": "6.17.0-20-generic",
       "name": "Linux",
