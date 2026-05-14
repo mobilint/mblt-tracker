@@ -16,11 +16,23 @@ class DramInfo(TypedDict):
     available_bytes: int
 
 
+class DramModuleInfo(TypedDict, total=False):
+    capacity_bytes: int
+    ram_type: str
+    speed_mhz: int
+    configured_speed_mhz: int
+    data_width_bits: int
+    total_width_bits: int
+    theoretical_bandwidth_gbps: float
+
+
 class DramInfoOptional(DramInfo, total=False):
     ram_type: str
     speed_mhz: int
     configured_speed_mhz: int
     theoretical_bandwidth_gbps: float
+    module_count: int
+    modules: list[DramModuleInfo]
 
 
 class CpuPowerPolicy(TypedDict):
@@ -148,6 +160,7 @@ STATIC_INFO_CHILD_SCHEMAS: dict[type, dict[str, object]] = {
         "npus": [NpuDeviceInfo],
         "pcie_devices": [PcieDeviceInfo],
     },
+    DramInfoOptional: {"modules": [DramModuleInfo]},
     GpuHardwareInfoOptional: {"devices": [GpuStaticDeviceInfo]},
     InferenceInfo: {
         "cpu": CpuPowerPolicy,

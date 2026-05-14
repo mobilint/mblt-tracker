@@ -118,10 +118,11 @@ The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU
 
 The following examples show representative `mblt-tracker collect` outputs across
 Windows and Linux systems. Public static output intentionally omits
-privacy-sensitive host and device instance identifiers: DRAM DIMM
-serial/part/manufacturer details are not collected, and PCIe `bus_address` /
-Windows `pnp_device_id` are not exposed, including when `--all-pcie-devices` is
-used.
+privacy-sensitive host and device instance identifiers: DRAM DIMM part/serial
+numbers and PCIe `bus_address` / Windows `pnp_device_id` are not exposed,
+including when `--all-pcie-devices` is used. DRAM speed, type, module capacity,
+and estimated theoretical bandwidth are kept to make benchmark results easier to
+interpret.
 
 #### Windows host with Intel UHD Graphics, NVIDIA RTX 3090, and Mobilint NPU
 
@@ -143,6 +144,27 @@ WARNING:root:imports error
     "dram": {
       "available_bytes": 15008358400,
       "configured_speed_mhz": 5600,
+      "module_count": 2,
+      "modules": [
+        {
+          "capacity_bytes": 17179869184,
+          "configured_speed_mhz": 5600,
+          "data_width_bits": 64,
+          "ram_type": "DDR5",
+          "speed_mhz": 5600,
+          "theoretical_bandwidth_gbps": 44.8,
+          "total_width_bits": 64
+        },
+        {
+          "capacity_bytes": 17179869184,
+          "configured_speed_mhz": 5600,
+          "data_width_bits": 64,
+          "ram_type": "DDR5",
+          "speed_mhz": 5600,
+          "theoretical_bandwidth_gbps": 44.8,
+          "total_width_bits": 64
+        }
+      ],
       "ram_type": "DDR5",
       "speed_mhz": 5600,
       "theoretical_bandwidth_gbps": 89.6,
@@ -675,7 +697,7 @@ Static information is collected on a best-effort, privacy-first basis and may va
 Typical fields include:
 
 - `hardware.cpu`: CPU architecture, model name, vendor, physical cores, logical cores
-- `hardware.dram`: total and available memory in bytes, plus optional privacy-safe aggregate fields such as `ram_type`, `speed_mhz`, `configured_speed_mhz`, and `theoretical_bandwidth_gbps` when available. Individual DIMM serial numbers, part numbers, manufacturers, and `hardware.dram.dimms` are not collected or exposed.
+- `hardware.dram`: total and available memory in bytes, plus optional privacy-safe aggregate fields such as `ram_type`, `speed_mhz`, `configured_speed_mhz`, `module_count`, `modules`, and `theoretical_bandwidth_gbps` when available. Individual DIMM serial numbers, part numbers, and PCIe/device instance identifiers are not exposed.
 - `inference.os`: OS name, version, and kernel version
 - `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
 - `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names

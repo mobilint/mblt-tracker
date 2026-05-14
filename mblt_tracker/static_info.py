@@ -73,6 +73,13 @@ def get_host_static_info(
 
     if platform.system() == "Windows":
         info["hardware"]["dram"].update(_read_dram_summary_windows())
+    elif platform.system() == "Linux":
+        info["hardware"]["dram"].update(
+            _read_dram_summary_linux(
+                sudo_password=sudo_password,
+                sudo_password_provider=sudo_password_provider,
+            )
+        )
 
     if platform.system() == "Linux":
         os_release = _read_os_release()
@@ -581,7 +588,7 @@ def _read_dram_summary_windows() -> dict[str, object]:
             "Bypass",
             "-Command",
             "Get-CimInstance Win32_PhysicalMemory | "
-            "Select-Object Capacity,Speed,"
+            "Select-Object Manufacturer,PartNumber,SerialNumber,Capacity,Speed,"
             "ConfiguredClockSpeed,DataWidth,TotalWidth,SMBIOSMemoryType | "
             "ConvertTo-Json -Depth 3",
         ]
@@ -604,6 +611,9 @@ def _read_dram_summary_windows() -> dict[str, object]:
     modules = []
     for entry in entries:
         module = {
+            "manufacturer": _clean_dram_string(entry.get("Manufacturer")),
+            "part_number": _clean_dram_string(entry.get("PartNumber")),
+            "serial_number": _clean_dram_string(entry.get("SerialNumber")),
             "capacity_bytes": _to_int(entry.get("Capacity")),
             "speed_mhz": _to_int(entry.get("Speed")),
             "configured_speed_mhz": _to_int(entry.get("ConfiguredClockSpeed")),
@@ -617,17 +627,103 @@ def _read_dram_summary_windows() -> dict[str, object]:
     return _summarize_dram_modules(modules)
 
 
+def _read_dram_summary_linux(
+    sudo_password: str | None = None,
+    sudo_password_provider: Callable[[], str] | None = None,
+) -> dict[str, object]:
+    """Collect privacy-safe DRAM aggregate information from Linux dmidecode."""
+    modules = _read_dram_dimms_linux(
+        sudo_password=sudo_password,
+        sudo_password_provider=sudo_password_provider,
+    )
+    return _summarize_dram_modules(modules)
+
+
+def _read_dram_dimms_linux(
+    sudo_password: str | None = None,
+    sudo_password_provider: Callable[[], str] | None = None,
+) -> list[dict[str, object]]:
+    """Collect physical memory module information from Linux dmidecode.
+
+    ``dmidecode`` normally requires root privileges. Try the direct command
+    first, then a non-interactive sudo fallback. Only use ``sudo -S`` when a
+    password or provider is explicitly supplied by Python API callers; the CLI
+    passes no provider, so it never prompts for sudo credentials.
+    """
+    output = run_command(["dmidecode", "-t", "memory"])
+    if output is None:
+        output = run_command(["sudo", "-n", "dmidecode", "-t", "memory"])
+    if output is None:
+        if sudo_password is None and sudo_password_provider is not None:
+            sudo_password = sudo_password_provider()
+        if sudo_password is not None:
+            output = run_command_with_input(
+                ["sudo", "-S", "-p", "", "dmidecode", "-t", "memory"],
+                input_text=f"{sudo_password}\n",
+                timeout=30,
+            )
+    if output is None:
+        return []
+    return _parse_linux_dmidecode_memory(output)
+
+
+def _parse_linux_dmidecode_memory(output: str) -> list[dict[str, object]]:
+    """Parse ``dmidecode -t memory`` output into raw DIMM dictionaries."""
+    modules = []
+    for section in re.split(r"\nHandle\s+", output):
+        if "Memory Device" not in section:
+            continue
+
+        fields = _parse_dmidecode_section_fields(section)
+        if fields.get("Size") in {None, "No Module Installed"}:
+            continue
+
+        module = {
+            "manufacturer": _clean_dram_string(fields.get("Manufacturer")),
+            "part_number": _clean_dram_string(fields.get("Part Number")),
+            "serial_number": _clean_dram_string(fields.get("Serial Number")),
+            "capacity_bytes": _parse_memory_size_to_bytes(fields.get("Size")),
+            "speed_mhz": _parse_memory_speed_to_mhz(fields.get("Speed")),
+            "configured_speed_mhz": _parse_memory_speed_to_mhz(
+                fields.get("Configured Memory Speed")
+            ),
+            "data_width_bits": _parse_memory_width_to_bits(fields.get("Data Width")),
+            "total_width_bits": _parse_memory_width_to_bits(fields.get("Total Width")),
+            "ram_type": _clean_dram_string(fields.get("Type")),
+        }
+        cleaned = {key: value for key, value in module.items() if value is not None}
+        if cleaned:
+            modules.append(cleaned)
+    return modules
+
+
+def _parse_dmidecode_section_fields(section: str) -> dict[str, str]:
+    fields = {}
+    for line in section.splitlines():
+        if ":" not in line:
+            continue
+        key, value = [part.strip() for part in line.split(":", 1)]
+        if key:
+            fields[key] = value
+    return fields
+
+
 def _summarize_dram_modules(
     modules: Sequence[Mapping[str, object]],
 ) -> dict[str, object]:
     """Collapse safe module-level DRAM performance fields into public aggregates."""
     summary: dict[str, object] = {}
+    safe_modules = [_sanitize_dram_module(module) for module in modules]
+    safe_modules = [module for module in safe_modules if module]
     ram_type = _common_str(module.get("ram_type") for module in modules)
     speed_mhz = _common_int(module.get("speed_mhz") for module in modules)
     configured_speed_mhz = _common_int(
         module.get("configured_speed_mhz") for module in modules
     )
     theoretical_bandwidth_gbps = _calculate_theoretical_bandwidth_gbps(modules)
+    if safe_modules:
+        summary["module_count"] = len(safe_modules)
+        summary["modules"] = safe_modules
     if ram_type is not None:
         summary["ram_type"] = ram_type
     if speed_mhz is not None:
@@ -637,6 +733,23 @@ def _summarize_dram_modules(
     if theoretical_bandwidth_gbps is not None:
         summary["theoretical_bandwidth_gbps"] = theoretical_bandwidth_gbps
     return summary
+
+
+def _sanitize_dram_module(module: Mapping[str, object]) -> dict[str, object]:
+    """Return public DIMM fields, excluding model/serial/private identifiers."""
+    safe_keys = (
+        "capacity_bytes",
+        "ram_type",
+        "speed_mhz",
+        "configured_speed_mhz",
+        "data_width_bits",
+        "total_width_bits",
+    )
+    sanitized = {key: module[key] for key in safe_keys if module.get(key) is not None}
+    bandwidth_gbps = _calculate_theoretical_bandwidth_gbps([module])
+    if bandwidth_gbps is not None:
+        sanitized["theoretical_bandwidth_gbps"] = bandwidth_gbps
+    return sanitized
 
 
 def _common_int(values: Sequence[object]) -> int | None:
@@ -655,6 +768,56 @@ def _common_str(values: Sequence[object]) -> str | None:
         return None
     first = strings[0]
     return first if all(value == first for value in strings) else None
+
+
+def _parse_memory_size_to_bytes(value: str | None) -> int | None:
+    if value is None:
+        return None
+    match = re.search(r"([0-9]+)\s*([KMGT]B)", value, re.IGNORECASE)
+    if match is None:
+        return None
+    amount = int(match.group(1))
+    unit = match.group(2).upper()
+    multipliers = {
+        "KB": 1024,
+        "MB": 1024**2,
+        "GB": 1024**3,
+        "TB": 1024**4,
+    }
+    return amount * multipliers[unit]
+
+
+def _parse_memory_speed_to_mhz(value: str | None) -> int | None:
+    if value is None or value.strip().lower() == "unknown":
+        return None
+    match = re.search(r"([0-9]+)", value)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _parse_memory_width_to_bits(value: str | None) -> int | None:
+    if value is None or value.strip().lower() == "unknown":
+        return None
+    match = re.search(r"([0-9]+)", value)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _clean_dram_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or value.lower() in {
+        "unknown",
+        "not specified",
+        "not provided",
+        "none",
+        "to be filled by o.e.m.",
+    }:
+        return None
+    return value
 
 
 def get_linux_npu_driver_firmware_info(

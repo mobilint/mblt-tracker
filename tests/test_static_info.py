@@ -14,10 +14,12 @@ from mblt_tracker.static_info import (
     _get_cuda_version,
     _get_python_package_version,
     _normalize_windows_power_plan_name,
+    _parse_linux_dmidecode_memory,
     _parse_nvcc_cuda_version,
     _parse_windows_active_power_scheme,
     _parse_windows_pci_id,
     _parse_windows_power_setting_ac_value,
+    _read_dram_dimms_linux,
     _read_dram_summary_windows,
     _read_lspci_device_metadata,
     _read_windows_pci_link_properties,
@@ -396,6 +398,9 @@ def test_read_dram_summary_windows_parses_safe_cim_json(monkeypatch) -> None:
     output = """
     [
       {
+        "Manufacturer": "Samsung",
+        "PartNumber": "M323R2GA3PB0-CWMOL",
+        "SerialNumber": "48A201A4",
         "Capacity": "8589934592",
         "Speed": 3200,
         "ConfiguredClockSpeed": 3200,
@@ -404,6 +409,9 @@ def test_read_dram_summary_windows_parses_safe_cim_json(monkeypatch) -> None:
         "SMBIOSMemoryType": 26
       },
       {
+        "Manufacturer": "Samsung",
+        "PartNumber": "M323R2GA3PB0-CWMOL",
+        "SerialNumber": "48A201E5",
         "Capacity": "8589934592",
         "Speed": 3200,
         "ConfiguredClockSpeed": 3200,
@@ -425,15 +433,39 @@ def test_read_dram_summary_windows_parses_safe_cim_json(monkeypatch) -> None:
     summary = _read_dram_summary_windows()
 
     powershell_command = commands[0][-1]
-    assert "Manufacturer" not in powershell_command
-    assert "PartNumber" not in powershell_command
-    assert "SerialNumber" not in powershell_command
+    assert "Manufacturer" in powershell_command
+    assert "PartNumber" in powershell_command
+    assert "SerialNumber" in powershell_command
     assert summary == {
+        "module_count": 2,
+        "modules": [
+            {
+                "capacity_bytes": 8589934592,
+                "ram_type": "DDR4",
+                "speed_mhz": 3200,
+                "configured_speed_mhz": 3200,
+                "data_width_bits": 64,
+                "total_width_bits": 72,
+                "theoretical_bandwidth_gbps": 25.6,
+            },
+            {
+                "capacity_bytes": 8589934592,
+                "ram_type": "DDR4",
+                "speed_mhz": 3200,
+                "configured_speed_mhz": 3200,
+                "data_width_bits": 64,
+                "total_width_bits": 64,
+                "theoretical_bandwidth_gbps": 25.6,
+            },
+        ],
         "ram_type": "DDR4",
         "speed_mhz": 3200,
         "configured_speed_mhz": 3200,
         "theoretical_bandwidth_gbps": 51.2,
     }
+    assert "part_number" not in json.dumps(summary)
+    assert "serial_number" not in json.dumps(summary)
+    assert "manufacturer" not in json.dumps(summary)
 
 
 def test_read_dram_summary_windows_returns_empty_dict_on_command_failure(
@@ -444,7 +476,7 @@ def test_read_dram_summary_windows_returns_empty_dict_on_command_failure(
     assert _read_dram_summary_windows() == {}
 
 
-def test_get_host_static_info_linux_does_not_call_dmidecode_or_password_provider(
+def test_get_host_static_info_linux_handles_unavailable_dmidecode_without_password_provider(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(static_info.platform, "system", lambda: "Linux")
@@ -470,22 +502,112 @@ def test_get_host_static_info_linux_does_not_call_dmidecode_or_password_provider
     monkeypatch.setattr(static_info, "_get_cuda_version", lambda: None)
     monkeypatch.setattr(static_info, "_get_python_package_version", lambda _name: None)
 
-    def fail_run_command(command):
-        if "dmidecode" in command:
-            raise AssertionError("dmidecode should not be called")
+    commands = []
+
+    def fake_run_command(command):
+        commands.append(command)
         return None
 
-    def fail_password_provider():
-        raise AssertionError("password provider should not be called")
+    monkeypatch.setattr(static_info, "run_command", fake_run_command)
 
-    monkeypatch.setattr(static_info, "run_command", fail_run_command)
-
-    info = get_host_static_info(sudo_password_provider=fail_password_provider)
+    info = get_host_static_info()
 
     dram = info["hardware"]["dram"]
     assert dram == {"total_bytes": 16, "available_bytes": 8}
     assert "dimms" not in dram
     assert "dimms_collection_note" not in dram
+    assert ["dmidecode", "-t", "memory"] in commands
+    assert ["sudo", "-n", "dmidecode", "-t", "memory"] in commands
+
+
+def test_parse_linux_dmidecode_memory_omits_sensitive_fields_from_summary() -> None:
+    output = """
+Handle 0x0038, DMI type 17, 92 bytes
+Memory Device
+        Total Width: 72 bits
+        Data Width: 64 bits
+        Size: 16 GB
+        Type: DDR5
+        Speed: 5600 MT/s
+        Manufacturer: Samsung
+        Serial Number: 48A201A4
+        Part Number: M323R2GA3PB0-CWMOL
+        Configured Memory Speed: 5600 MT/s
+
+Handle 0x0039, DMI type 17, 92 bytes
+Memory Device
+        Total Width: 64 bits
+        Data Width: 64 bits
+        Size: No Module Installed
+    """
+
+    dimms = _parse_linux_dmidecode_memory(output)
+
+    assert dimms == [
+        {
+            "manufacturer": "Samsung",
+            "part_number": "M323R2GA3PB0-CWMOL",
+            "serial_number": "48A201A4",
+            "capacity_bytes": 16 * 1024**3,
+            "speed_mhz": 5600,
+            "configured_speed_mhz": 5600,
+            "data_width_bits": 64,
+            "total_width_bits": 72,
+            "ram_type": "DDR5",
+        }
+    ]
+    summary = static_info._summarize_dram_modules(dimms)
+    assert summary == {
+        "module_count": 1,
+        "modules": [
+            {
+                "capacity_bytes": 16 * 1024**3,
+                "ram_type": "DDR5",
+                "speed_mhz": 5600,
+                "configured_speed_mhz": 5600,
+                "data_width_bits": 64,
+                "total_width_bits": 72,
+                "theoretical_bandwidth_gbps": 44.8,
+            }
+        ],
+        "ram_type": "DDR5",
+        "speed_mhz": 5600,
+        "configured_speed_mhz": 5600,
+        "theoretical_bandwidth_gbps": 44.8,
+    }
+    assert "part_number" not in json.dumps(summary)
+    assert "serial_number" not in json.dumps(summary)
+    assert "manufacturer" not in json.dumps(summary)
+
+
+def test_read_dram_dimms_linux_tries_non_interactive_sudo(monkeypatch) -> None:
+    output = """
+Handle 0x0038, DMI type 17, 92 bytes
+Memory Device
+        Total Width: 64 bits
+        Data Width: 64 bits
+        Size: 8 GB
+        Type: DDR4
+        Speed: 3200 MT/s
+        Configured Memory Speed: 3200 MT/s
+    """
+    commands = []
+
+    def fake_run_command(command):
+        commands.append(command)
+        if command == ["sudo", "-n", "dmidecode", "-t", "memory"]:
+            return output
+        return None
+
+    monkeypatch.setattr(static_info, "run_command", fake_run_command)
+
+    dimms = _read_dram_dimms_linux()
+
+    assert commands == [
+        ["dmidecode", "-t", "memory"],
+        ["sudo", "-n", "dmidecode", "-t", "memory"],
+    ]
+    assert dimms[0]["ram_type"] == "DDR4"
 
 
 def test_calculate_theoretical_bandwidth_gbps() -> None:
