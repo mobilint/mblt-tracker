@@ -24,8 +24,9 @@ from ._types import (
 def get_host_static_info(
     sudo_password: str | None = None,
     sudo_password_provider: Callable[[], str] | None = None,
+    pcie_devices: list[dict[str, object]] | None = None,
 ) -> CollectOutput:
-    """Collect best-effort host CPU, DRAM, and OS static information."""
+    """Collect best-effort host CPU, DRAM, motherboard, and OS static info."""
     virtual_memory = psutil.virtual_memory()
     info: CollectOutput = {
         "hardware": {
@@ -70,6 +71,16 @@ def get_host_static_info(
         cpu_info["model_name"] = model_name
     if vendor:
         cpu_info["vendor"] = vendor
+    cpu_info.update(_read_cpu_clock_info(model_name))
+
+    dram_info = info["hardware"]["dram"]
+    _add_memory_unit_fields(dram_info, "total_bytes", "total_mb", "total_gb")
+    _add_memory_unit_fields(
+        dram_info,
+        "available_bytes",
+        "available_mb",
+        "available_gb",
+    )
 
     if platform.system() == "Windows":
         info["hardware"]["dram"].update(_read_dram_summary_windows())
@@ -80,6 +91,14 @@ def get_host_static_info(
                 sudo_password_provider=sudo_password_provider,
             )
         )
+
+    motherboard = _read_motherboard_summary(
+        pcie_devices=pcie_devices,
+        sudo_password=sudo_password,
+        sudo_password_provider=sudo_password_provider,
+    )
+    if motherboard:
+        info["hardware"]["motherboard"] = motherboard
 
     if platform.system() == "Linux":
         os_release = _read_os_release()
@@ -578,6 +597,133 @@ def _parse_windows_power_setting_ac_value(output: str) -> int | None:
         return None
 
 
+def _memory_size_units(byte_count: object) -> dict[str, float]:
+    bytes_value = _to_int(byte_count)
+    if bytes_value is None or bytes_value < 0:
+        return {}
+    return {
+        "mb": round(bytes_value / 1024**2, 2),
+        "gb": round(bytes_value / 1024**3, 2),
+    }
+
+
+def _add_memory_unit_fields(
+    target: dict[str, object],
+    byte_key: str,
+    mb_key: str,
+    gb_key: str,
+) -> None:
+    units = _memory_size_units(target.get(byte_key))
+    if units:
+        target[mb_key] = units["mb"]
+        target[gb_key] = units["gb"]
+
+
+def _read_cpu_clock_info(model_name: str | None = None) -> dict[str, object]:
+    if platform.system() == "Windows":
+        return _read_cpu_clock_info_windows()
+    if platform.system() == "Linux":
+        return _read_cpu_clock_info_linux(model_name)
+    base_clock = _parse_clock_from_cpu_model_name(model_name)
+    return {"base_clock_mhz": base_clock} if base_clock is not None else {}
+
+
+def _read_cpu_clock_info_linux(model_name: str | None = None) -> dict[str, object]:
+    info: dict[str, object] = {}
+    cpufreq_root = Path("/sys/devices/system/cpu/cpu0/cpufreq")
+    base_clock = _parse_clock_to_mhz(_read_first_line(cpufreq_root / "base_frequency"))
+    if base_clock is None:
+        base_clock = _parse_clock_from_cpu_model_name(model_name)
+    max_clock = _parse_clock_to_mhz(_read_first_line(cpufreq_root / "cpuinfo_max_freq"))
+    if base_clock is not None and base_clock > 0:
+        info["base_clock_mhz"] = base_clock
+    if max_clock is not None and max_clock > 0:
+        info["max_clock_mhz"] = max_clock
+        if base_clock is not None and max_clock >= base_clock:
+            info["boost_clock_mhz"] = max_clock
+    return info
+
+
+def _read_cpu_clock_info_windows() -> dict[str, object]:
+    output = run_command(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "Get-CimInstance Win32_Processor | "
+            "Select-Object Name,MaxClockSpeed,CurrentClockSpeed | "
+            "ConvertTo-Json -Depth 3",
+        ]
+    )
+    if output is None:
+        return {}
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        return {}
+    entries = [parsed] if isinstance(parsed, dict) else parsed
+    if not isinstance(entries, list):
+        return {}
+    processors = [entry for entry in entries if isinstance(entry, dict)]
+    if not processors:
+        return {}
+    base_values = {
+        value
+        for value in (
+            _parse_clock_from_cpu_model_name(_get_str(entry.get("Name")))
+            for entry in processors
+        )
+        if value is not None and value > 0
+    }
+    max_values = {
+        value
+        for value in (_parse_clock_to_mhz(entry.get("MaxClockSpeed")) for entry in processors)
+        if value is not None and value > 0
+    }
+    info: dict[str, object] = {}
+    if len(base_values) == 1:
+        info["base_clock_mhz"] = next(iter(base_values))
+    if len(max_values) == 1:
+        max_clock = next(iter(max_values))
+        info["max_clock_mhz"] = max_clock
+        base_clock = _to_int(info.get("base_clock_mhz"))
+        if base_clock is not None and max_clock >= base_clock:
+            info["boost_clock_mhz"] = max_clock
+    return info
+
+
+def _parse_clock_to_mhz(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        # Linux cpufreq sysfs uses kHz for large integer values.
+        return round(value / 1000) if value >= 100_000 else value
+    text = str(value).strip()
+    if not text:
+        return None
+    match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*([GMK]?HZ)?", text, re.IGNORECASE)
+    if match is None:
+        return None
+    amount = float(match.group(1))
+    unit = (match.group(2) or "MHz").lower()
+    if unit == "ghz":
+        return round(amount * 1000)
+    if unit == "khz" or (unit == "mhz" and amount >= 100_000):
+        return round(amount / 1000)
+    return round(amount)
+
+
+def _parse_clock_from_cpu_model_name(model_name: str | None) -> int | None:
+    if not model_name:
+        return None
+    match = re.search(r"@\s*([0-9]+(?:\.[0-9]+)?)\s*([GMK]?Hz)", model_name, re.IGNORECASE)
+    if match is None:
+        return None
+    return _parse_clock_to_mhz(" ".join(match.groups()))
+
+
 def _read_dram_summary_windows() -> dict[str, object]:
     """Collect privacy-safe DRAM aggregate information from Windows CIM."""
     output = run_command(
@@ -650,21 +796,39 @@ def _read_dram_dimms_linux(
     password or provider is explicitly supplied by Python API callers; the CLI
     passes no provider, so it never prompts for sudo credentials.
     """
-    output = run_command(["dmidecode", "-t", "memory"])
-    if output is None:
-        output = run_command(["sudo", "-n", "dmidecode", "-t", "memory"])
-    if output is None:
-        if sudo_password is None and sudo_password_provider is not None:
-            sudo_password = sudo_password_provider()
-        if sudo_password is not None:
-            output = run_command_with_input(
-                ["sudo", "-S", "-p", "", "dmidecode", "-t", "memory"],
-                input_text=f"{sudo_password}\n",
-                timeout=30,
-            )
+    output = _read_dmidecode_output(
+        ["memory"],
+        sudo_password=sudo_password,
+        sudo_password_provider=sudo_password_provider,
+    )
     if output is None:
         return []
     return _parse_linux_dmidecode_memory(output)
+
+
+def _read_dmidecode_output(
+    dmidecode_types: Sequence[str],
+    sudo_password: str | None = None,
+    sudo_password_provider: Callable[[], str] | None = None,
+) -> str | None:
+    command = ["dmidecode"]
+    for dmidecode_type in dmidecode_types:
+        command.extend(["-t", dmidecode_type])
+    output = run_command(command)
+    if output is not None:
+        return output
+    output = run_command(["sudo", "-n", *command])
+    if output is not None:
+        return output
+    if sudo_password is None and sudo_password_provider is not None:
+        sudo_password = sudo_password_provider()
+    if sudo_password is None:
+        return None
+    return run_command_with_input(
+        ["sudo", "-S", "-p", "", *command],
+        input_text=f"{sudo_password}\n",
+        timeout=30,
+    )
 
 
 def _parse_linux_dmidecode_memory(output: str) -> list[dict[str, object]]:
@@ -746,6 +910,7 @@ def _sanitize_dram_module(module: Mapping[str, object]) -> dict[str, object]:
         "total_width_bits",
     )
     sanitized = {key: module[key] for key in safe_keys if module.get(key) is not None}
+    _add_memory_unit_fields(sanitized, "capacity_bytes", "capacity_mb", "capacity_gb")
     bandwidth_gbps = _calculate_theoretical_bandwidth_gbps([module])
     if bandwidth_gbps is not None:
         sanitized["theoretical_bandwidth_gbps"] = bandwidth_gbps
@@ -1162,6 +1327,301 @@ def _windows_memory_type_to_text(value: object) -> str | None:
         34: "DDR5",
     }
     return memory_types.get(memory_type)
+
+
+def _read_motherboard_summary(
+    pcie_devices: list[dict[str, object]] | None = None,
+    sudo_password: str | None = None,
+    sudo_password_provider: Callable[[], str] | None = None,
+) -> dict[str, object]:
+    if platform.system() == "Windows":
+        return _read_motherboard_summary_windows(pcie_devices)
+    if platform.system() == "Linux":
+        return _read_motherboard_summary_linux(
+            pcie_devices,
+            sudo_password=sudo_password,
+            sudo_password_provider=sudo_password_provider,
+        )
+    return {}
+
+
+def _read_motherboard_summary_linux(
+    pcie_devices: list[dict[str, object]] | None = None,
+    sudo_password: str | None = None,
+    sudo_password_provider: Callable[[], str] | None = None,
+) -> dict[str, object]:
+    output = _read_dmidecode_output(
+        ["baseboard", "slot"],
+        sudo_password=sudo_password,
+        sudo_password_provider=sudo_password_provider,
+    )
+    motherboard = _parse_linux_dmidecode_baseboard(output or "")
+    slots = _parse_linux_dmidecode_system_slots(output or "")
+    devices = pcie_devices or []
+    chipset = _extract_chipset_from_pcie_devices(devices)
+    if chipset is not None:
+        motherboard["chipset"] = chipset
+    pcie = _summarize_motherboard_pcie(devices, slots)
+    if pcie:
+        motherboard["pcie"] = pcie
+    return motherboard
+
+
+def _read_motherboard_summary_windows(
+    pcie_devices: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    motherboard: dict[str, object] = {}
+    baseboard_output = run_command(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "Get-CimInstance Win32_BaseBoard | "
+            "Select-Object Manufacturer,Product,Version | "
+            "ConvertTo-Json -Depth 3",
+        ]
+    )
+    if baseboard_output is not None:
+        motherboard.update(_parse_windows_baseboard_json(baseboard_output))
+
+    slot_output = run_command(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "Get-CimInstance Win32_SystemSlot | "
+            "Select-Object SlotDesignation,ConnectorType,CurrentUsage,Length,"
+            "DataBusWidth,Status | ConvertTo-Json -Depth 3",
+        ]
+    )
+    slots = _parse_windows_system_slot_json(slot_output or "")
+    devices = pcie_devices or []
+    chipset = _extract_chipset_from_pcie_devices(devices)
+    if chipset is not None:
+        motherboard["chipset"] = chipset
+    pcie = _summarize_motherboard_pcie(devices, slots)
+    if pcie:
+        motherboard["pcie"] = pcie
+    return motherboard
+
+
+def _parse_linux_dmidecode_baseboard(output: str) -> dict[str, object]:
+    for section in re.split(r"\nHandle\s+", output):
+        if "Base Board Information" not in section:
+            continue
+        fields = _parse_dmidecode_section_fields(section)
+        values = {
+            "manufacturer": _clean_hardware_string(fields.get("Manufacturer")),
+            "model_name": _clean_hardware_string(fields.get("Product Name")),
+            "version": _clean_hardware_string(fields.get("Version")),
+        }
+        return {key: value for key, value in values.items() if value is not None}
+    return {}
+
+
+def _parse_linux_dmidecode_system_slots(output: str) -> list[dict[str, object]]:
+    slots = []
+    for section in re.split(r"\nHandle\s+", output):
+        if "System Slot Information" not in section:
+            continue
+        fields = _parse_dmidecode_section_fields(section)
+        slot_type = _clean_hardware_string(fields.get("Type"))
+        data_bus_width = _clean_hardware_string(fields.get("Data Bus Width"))
+        designation = _clean_hardware_string(fields.get("Designation"))
+        slot: dict[str, object] = {
+            "designation": designation,
+            "slot_type": slot_type,
+            "current_usage": _clean_hardware_string(fields.get("Current Usage")),
+            "length": _clean_hardware_string(fields.get("Length")),
+            "data_bus_width": data_bus_width,
+        }
+        for text in (slot_type, data_bus_width, designation):
+            if slot.get("link_generation") is None:
+                generation = _extract_slot_pcie_generation(text)
+                if generation is not None:
+                    slot["link_generation"] = generation
+            if slot.get("lane_width") is None:
+                width = _extract_slot_lane_width(text)
+                if width is not None:
+                    slot["lane_width"] = width
+        cleaned = {key: value for key, value in slot.items() if value is not None}
+        if cleaned:
+            slots.append(cleaned)
+    return slots
+
+
+def _parse_windows_baseboard_json(output: str) -> dict[str, object]:
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        return {}
+    entries = [parsed] if isinstance(parsed, dict) else parsed
+    if not isinstance(entries, list):
+        return {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        values = {
+            "manufacturer": _clean_hardware_string(entry.get("Manufacturer")),
+            "model_name": _clean_hardware_string(entry.get("Product")),
+            "version": _clean_hardware_string(entry.get("Version")),
+        }
+        return {key: value for key, value in values.items() if value is not None}
+    return {}
+
+
+def _parse_windows_system_slot_json(output: str) -> list[dict[str, object]]:
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        return []
+    entries = [parsed] if isinstance(parsed, dict) else parsed
+    if not isinstance(entries, list):
+        return []
+    slots = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        slot_type = _clean_hardware_string(entry.get("ConnectorType"))
+        data_bus_width = _clean_hardware_string(entry.get("DataBusWidth"))
+        slot: dict[str, object] = {
+            "designation": _clean_hardware_string(entry.get("SlotDesignation")),
+            "slot_type": slot_type,
+            "current_usage": _clean_hardware_string(entry.get("CurrentUsage")),
+            "length": _clean_hardware_string(entry.get("Length")),
+            "data_bus_width": data_bus_width,
+            "status": _clean_hardware_string(entry.get("Status")),
+        }
+        combined_text = " ".join(str(v) for v in slot.values() if v is not None)
+        generation = _extract_slot_pcie_generation(combined_text)
+        width = _extract_slot_lane_width(combined_text)
+        if generation is not None:
+            slot["link_generation"] = generation
+        if width is not None:
+            slot["lane_width"] = width
+        cleaned = {key: value for key, value in slot.items() if value is not None}
+        if cleaned:
+            slots.append(cleaned)
+    return slots
+
+
+def _extract_slot_pcie_generation(value: object) -> str | None:
+    if value is None:
+        return None
+    match = re.search(r"(?:PCI\s*E(?:xpress)?|Gen)\D*([1-6])", str(value), re.IGNORECASE)
+    if match is not None:
+        return f"Gen{match.group(1)}"
+    return _link_speed_to_generation(str(value))
+
+
+def _extract_slot_lane_width(value: object) -> str | None:
+    if value is None:
+        return None
+    return _format_max_lane_width(value)
+
+
+def _extract_chipset_from_pcie_devices(
+    pcie_devices: Sequence[Mapping[str, object]],
+) -> str | None:
+    preferred_classes = ("0600", "0601", "0604", "0c05")
+    keywords = ("chipset", "host bridge", "isa bridge", "lpc", "smbus", "root port")
+    for device in pcie_devices:
+        class_code = _normalize_hex(str(device.get("class", ""))) or ""
+        text = " ".join(
+            str(device.get(key, "")) for key in ("manufacturer", "name")
+        ).strip()
+        lowered = text.lower()
+        if class_code.startswith(preferred_classes) or any(k in lowered for k in keywords):
+            return _clean_hardware_string(text)
+    return None
+
+
+def _summarize_motherboard_pcie(
+    pcie_devices: Sequence[Mapping[str, object]],
+    slots: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    pcie: dict[str, object] = {}
+    speeds = [str(device["max_link_speed"]) for device in pcie_devices if device.get("max_link_speed")]
+    best_speed = _max_link_speed(speeds)
+    if best_speed is not None:
+        pcie["max_link_speed"] = best_speed
+        generation = _link_speed_to_generation(best_speed)
+        if generation is not None:
+            pcie["max_link_generation"] = generation
+    slot_generations = [slot.get("link_generation") for slot in slots]
+    best_slot_generation = _max_generation(slot_generations)
+    if best_slot_generation is not None and "max_link_generation" not in pcie:
+        pcie["max_link_generation"] = best_slot_generation
+
+    widths = [device.get("max_link_width") for device in pcie_devices]
+    widths.extend(slot.get("lane_width") or slot.get("data_bus_width") for slot in slots)
+    best_width = _max_lane_width(widths)
+    if best_width is not None:
+        pcie["max_lane_width"] = best_width
+    if slots:
+        pcie["slots"] = [dict(slot) for slot in slots if slot]
+    return pcie
+
+
+def _format_max_lane_width(value: object) -> str | None:
+    if value is None:
+        return None
+    match = re.search(r"x\s*([0-9]+)", str(value), re.IGNORECASE)
+    if match is not None:
+        return f"x{int(match.group(1))}"
+    width = _to_int(value)
+    if width is not None and width > 0:
+        return f"x{width}"
+    return None
+
+
+def _max_lane_width(values: Sequence[object]) -> str | None:
+    widths = []
+    for value in values:
+        width = _format_max_lane_width(value)
+        if width is not None:
+            widths.append(int(width[1:]))
+    return f"x{max(widths)}" if widths else None
+
+
+def _max_generation(values: Sequence[object]) -> str | None:
+    generations = []
+    for value in values:
+        if value is None:
+            continue
+        match = re.search(r"Gen\s*([1-6])", str(value), re.IGNORECASE)
+        if match is not None:
+            generations.append(int(match.group(1)))
+    return f"Gen{max(generations)}" if generations else None
+
+
+def _max_link_speed(values: Sequence[str]) -> str | None:
+    parsed = []
+    for value in values:
+        match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*GT/s", value, re.IGNORECASE)
+        if match is not None:
+            parsed.append((float(match.group(1)), value))
+    return max(parsed, key=lambda item: item[0])[1] if parsed else None
+
+
+def _clean_hardware_string(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {
+        "unknown",
+        "none",
+        "not specified",
+        "not provided",
+        "to be filled by o.e.m.",
+        "default string",
+    }:
+        return None
+    return text
 
 
 def _to_int(value: object) -> int | None:
@@ -1829,6 +2289,14 @@ def _format_pcie_device(
         formatted["lane_width"] = device["nvml_lane_width"]
     elif device.get("current_link_width") is not None:
         formatted["lane_width"] = f"x{device['current_link_width']}"
+    if device.get("max_link_speed") is not None:
+        max_generation = _link_speed_to_generation(str(device["max_link_speed"]))
+        if max_generation is not None:
+            formatted["max_link_generation"] = max_generation
+    if device.get("max_link_width") is not None:
+        max_lane_width = _format_max_lane_width(device["max_link_width"])
+        if max_lane_width is not None:
+            formatted["max_lane_width"] = max_lane_width
     return formatted
 
 
@@ -1853,7 +2321,14 @@ def _sanitize_value_for_public_output(value: object) -> object:
     if isinstance(value, dict):
         cleaned: dict[str, object] = {}
         for key, item in value.items():
-            if key in {"bus_address", "pnp_device_id", "dimms_collection_note"}:
+            if key in {
+                "asset_tag",
+                "bus_address",
+                "dimms_collection_note",
+                "instance_id",
+                "pnp_device_id",
+                "serial_number",
+            }:
                 continue
             if key == "dimms":
                 continue

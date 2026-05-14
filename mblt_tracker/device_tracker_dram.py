@@ -132,7 +132,7 @@ class DRAMDeviceTracker(BaseDeviceTracker):
         return list(self._power_trace)
 
     def get_static_info(self) -> dict[str, object]:
-        """Return best-effort host CPU, DRAM, and OS static information."""
+        """Return shared host static info with DRAM units and motherboard metadata."""
         return get_host_static_info()
 
     def reset(self) -> None:

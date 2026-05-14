@@ -24,9 +24,9 @@
 - **Comprehensive Metrics**: Capture Power (Watts), Utilization (%), Memory Usage (MB/%), and Temperature (C).
 - **Statistical Summaries**: Automatically calculates averages, peaks (max), and p99 values.
 - **Time-Series Traces**: Export raw data for custom plotting and analysis.
-- **Static Metadata**: Collect best-effort host, OS, PCIe, driver, firmware, and device information for reproducible benchmarks.
+- **Static Metadata**: Collect best-effort host, OS, CPU clock, DRAM capacity/type/speed, motherboard, PCIe, driver, firmware, and device information for reproducible benchmarks.
 - **CLI Collection Tool**: Use `mblt-tracker collect` to export static host and PCIe information as JSON.
-- **PCIe Discovery**: Detect GPU/NPU-related PCIe devices on Linux and Windows, including link speed/width where available.
+- **PCIe Discovery**: Detect GPU/NPU-related PCIe devices on Linux and Windows, including current and maximum link speed/width where available.
 - **Lightweight**: Minimal overhead, designed for production and research environments.
 
 ---
@@ -112,16 +112,17 @@ mblt-tracker collect --pcie-vendor-id 1ed5 --pcie-device-id 0100
 mblt-tracker collect --pcie-class-filter 0x12
 ```
 
-The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU, NPU, driver, and PCIe information. NVIDIA GPU entries are sourced from NVML and enriched with PCIe metadata where available. On Linux, PCIe information is read from sysfs. On Windows, PCI devices are collected through PowerShell/CIM/PnP queries.
+The CLI output is a JSON document containing best-effort host CPU, DRAM, motherboard, OS, GPU, NPU, driver, and PCIe information. NVIDIA GPU entries are sourced from NVML and enriched with PCIe metadata where available. On Linux, PCIe information is read from sysfs. On Windows, PCI devices are collected through PowerShell/CIM/PnP queries.
 
 ### Example Output
 
 The following examples show representative `mblt-tracker collect` outputs across
 Windows and Linux systems. Public static output intentionally omits
 privacy-sensitive host and device instance identifiers: DRAM DIMM part/serial
-numbers and PCIe `bus_address` / Windows `pnp_device_id` are not exposed,
-including when `--all-pcie-devices` is used. DRAM speed, type, module capacity,
-and estimated theoretical bandwidth are kept to make benchmark results easier to
+numbers, motherboard serial/asset tags, and PCIe `bus_address` / Windows
+`pnp_device_id` are not exposed, including when `--all-pcie-devices` is used.
+DRAM byte counts are accompanied by MB/GB display units; DRAM speed, type,
+module capacity, and estimated theoretical bandwidth are kept to make benchmark results easier to
 interpret.
 
 #### Windows host with Intel UHD Graphics, NVIDIA RTX 3090, and Mobilint NPU
@@ -568,7 +569,7 @@ Warning: NVML not available. GPU information will not be collected.
 | **Utilization (%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
 | **Memory (MB/%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
 | **Temperature (C)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Static Info** | ✅ Host/OS/DRAM | ✅ Host/OS/DRAM | ✅ NVML + PCIe | ✅ PCIe + `mobilint-cli` |
+| **Static Info** | ✅ Host/OS/DRAM/Motherboard | ✅ Host/OS/DRAM/Motherboard | ✅ NVML + PCIe | ✅ PCIe + `mobilint-cli` |
 | **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (Logical NPU Cards) |
 
 ---
@@ -589,7 +590,7 @@ Uses **pyRAPL** for power measurements and **psutil** for utilization/memory.
 
 - **Features**: Tracks total system CPU usage or specific indices (e.g., `CPUDeviceTracker(cpu_id=[0, 1])`).
 - **Temperature**: Uses `psutil.sensors_temperatures()` when the platform exposes CPU thermal sensors.
-- **Static Info**: Reports CPU architecture, model, vendor, physical/logical cores, DRAM capacity, OS details, and Linux CPU governor when available.
+- **Static Info**: Reports CPU architecture, model, vendor, physical/logical cores, optional base/boost/max clock metadata, DRAM capacity/type/speed, motherboard metadata, OS details, and CPU power policy when available.
 
 ### NVIDIA GPU
 
@@ -609,7 +610,7 @@ Uses the **Intel RAPL DRAM domain** through `pyRAPL` for host DRAM power measure
 - **Features**: Tracks all detected CPU socket DRAM domains by default, or specific socket IDs with `DRAMDeviceTracker(socket_id=0)` / `DRAMDeviceTracker(socket_id=[0, 1])`.
 - **Metrics**: Reports total host DRAM power through standard keys (`avg_power_w`, `p99_power_w`, `max_power_w`) and DRAM-specific aliases (`avg_dram_power_w`, `p99_dram_power_w`, `max_dram_power_w`). Per-socket statistics are returned under `metrics["dram"]`.
 - **Trace**: `DRAMDeviceTracker.get_trace()` returns total host DRAM power as `list[(timestamp, power_w)]`.
-- **Static Info**: `DRAMDeviceTracker.get_static_info()` returns the same privacy-first host CPU, aggregate DRAM capacity, and OS metadata as host static collection. Individual DIMM identifiers are not collected.
+- **Static Info**: `DRAMDeviceTracker.get_static_info()` returns the same privacy-first host CPU, aggregate DRAM capacity with MB/GB display units, optional DIMM capacity/type/speed summaries, motherboard metadata, and OS metadata as host static collection. Individual DIMM identifiers are not exposed.
 
 ### Mobilint NPU
 
@@ -696,13 +697,15 @@ Static information is collected on a best-effort, privacy-first basis and may va
 
 Typical fields include:
 
-- `hardware.cpu`: CPU architecture, model name, vendor, physical cores, logical cores
-- `hardware.dram`: total and available memory in bytes, plus optional privacy-safe aggregate fields such as `ram_type`, `speed_mhz`, `configured_speed_mhz`, `module_count`, `modules`, and `theoretical_bandwidth_gbps` when available. Individual DIMM serial numbers, part numbers, and PCIe/device instance identifiers are not exposed.
+- `hardware.cpu`: CPU architecture, model name, vendor, physical cores, logical cores, plus optional `base_clock_mhz`, `boost_clock_mhz`, and `max_clock_mhz` when the platform exposes them
+- `hardware.dram`: total and available memory in bytes plus `total_mb`, `total_gb`, `available_mb`, and `available_gb`; optional privacy-safe aggregate fields include `ram_type`, `speed_mhz`, `configured_speed_mhz`, `module_count`, `modules`, and `theoretical_bandwidth_gbps` when available. Per-module entries may include `capacity_bytes`, `capacity_mb`, `capacity_gb`, DDR type, speed, width, and estimated bandwidth. Individual DIMM serial numbers, part numbers, and PCIe/device instance identifiers are not exposed.
+- `hardware.motherboard`: optional baseboard `manufacturer`, `model_name`, `version`, best-effort `chipset`, and `pcie` support/capability summary. Motherboard serial numbers, asset tags, PCI bus addresses, and Windows instance IDs are not exposed.
+- `hardware.motherboard.pcie`: optional maximum PCIe generation/speed/lane-width summary and privacy-safe slot metadata such as designation, type, usage, length, generation, and lane width.
 - `inference.os`: OS name, version, and kernel version
 - `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
 - `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names
-- `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices enriched with PCIe vendor/device IDs and link information where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
-- `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, link information, and firmware metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
+- `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices enriched with PCIe vendor/device IDs plus current and maximum link generation/width information where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
+- `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, current/maximum link information, and firmware metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
 - `hardware.npus[].card_model`: best-effort Mobilint card model classification such as `MLA100` or `MLA400` when `mobilint-cli status -q` exposes enough information
 - `hardware.npus[].card_id`: logical NPU card ID used by `NPUDeviceTracker(npu_id=...)`; MLA400 Aries chips share the same card ID
 - `inference.gpu`: NVIDIA driver and CUDA driver versions. The CLI normalizes the CUDA driver version as a string such as `"13.0"`; `GPUDeviceTracker.get_static_info()` returns the raw NVML CUDA driver integer.

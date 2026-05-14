@@ -441,6 +441,8 @@ def test_read_dram_summary_windows_parses_safe_cim_json(monkeypatch) -> None:
         "modules": [
             {
                 "capacity_bytes": 8589934592,
+                "capacity_mb": 8192.0,
+                "capacity_gb": 8.0,
                 "ram_type": "DDR4",
                 "speed_mhz": 3200,
                 "configured_speed_mhz": 3200,
@@ -450,6 +452,8 @@ def test_read_dram_summary_windows_parses_safe_cim_json(monkeypatch) -> None:
             },
             {
                 "capacity_bytes": 8589934592,
+                "capacity_mb": 8192.0,
+                "capacity_gb": 8.0,
                 "ram_type": "DDR4",
                 "speed_mhz": 3200,
                 "configured_speed_mhz": 3200,
@@ -513,7 +517,14 @@ def test_get_host_static_info_linux_handles_unavailable_dmidecode_without_passwo
     info = get_host_static_info()
 
     dram = info["hardware"]["dram"]
-    assert dram == {"total_bytes": 16, "available_bytes": 8}
+    assert dram == {
+        "total_bytes": 16,
+        "available_bytes": 8,
+        "total_mb": 0.0,
+        "total_gb": 0.0,
+        "available_mb": 0.0,
+        "available_gb": 0.0,
+    }
     assert "dimms" not in dram
     assert "dimms_collection_note" not in dram
     assert ["dmidecode", "-t", "memory"] in commands
@@ -562,6 +573,8 @@ Memory Device
         "modules": [
             {
                 "capacity_bytes": 16 * 1024**3,
+                "capacity_mb": 16384.0,
+                "capacity_gb": 16.0,
                 "ram_type": "DDR5",
                 "speed_mhz": 5600,
                 "configured_speed_mhz": 5600,
