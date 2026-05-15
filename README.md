@@ -304,9 +304,9 @@ WARNING:root:imports error
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 334570467328,
-      "available_gb": 311.59,
-      "available_mb": 319071.26,
+      "available_bytes": 322689507328,
+      "available_gb": 300.53,
+      "available_mb": 307740.7,
       "total_bytes": 405389791232,
       "total_gb": 377.55,
       "total_mb": 386609.83
@@ -361,7 +361,7 @@ WARNING:root:imports error
       }
     ],
     "motherboard": {
-      "chipset": "Intel Corporation Device",
+      "chipset": "ASPEED Technology, Inc. AST1150 PCI-to-PCI Bridge",
       "manufacturer": "Supermicro",
       "model_name": "X13DEG-QT",
       "pcie": {
@@ -457,15 +457,15 @@ Warning: NVML not available. GPU information will not be collected.
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 27675623424,
-      "available_gb": 25.77,
-      "available_mb": 26393.53,
+      "available_bytes": 27281420288,
+      "available_gb": 25.41,
+      "available_mb": 26017.59,
       "total_bytes": 33379606528,
       "total_gb": 31.09,
       "total_mb": 31833.27
     },
     "motherboard": {
-      "chipset": "Intel Corporation Device",
+      "chipset": "Intel Corporation Raptor Lake PCI Express Root Port #25",
       "manufacturer": "ASUSTeK COMPUTER INC.",
       "model_name": "ROG STRIX B760-I GAMING WIFI",
       "pcie": {
@@ -761,7 +761,7 @@ Typical fields include:
 - `hardware.cpu`: CPU architecture, model name, and vendor
 - `hardware.dram`: total and available memory in bytes plus `total_mb`, `total_gb`, `available_mb`, and `available_gb`; optional privacy-safe aggregate fields include `ram_type`, `speed_mhz`, `configured_speed_mhz`, `module_count`, `modules`, and `theoretical_bandwidth_gbps` when available. Per-module entries may include `capacity_bytes`, `capacity_mb`, `capacity_gb`, DDR type, speed, width, and estimated bandwidth. Individual DIMM serial numbers, part numbers, and PCIe/device instance identifiers are not exposed.
 - `hardware.motherboard`: optional baseboard `manufacturer`, `model_name`, `version`, best-effort `chipset`, and `pcie` support/capability summary. Motherboard serial numbers, asset tags, PCI bus addresses, and Windows instance IDs are not exposed.
-- `hardware.motherboard.pcie`: optional maximum PCIe generation/speed/lane-width summary and privacy-safe slot metadata such as designation, type, usage, length, generation, and lane width.
+- `hardware.motherboard.pcie`: optional maximum PCIe generation/speed/lane-width summary.
 - `inference.os`: OS name, version, and kernel version
 - `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
 - `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names
