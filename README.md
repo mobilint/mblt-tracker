@@ -304,9 +304,9 @@ WARNING:root:imports error
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 335025516544,
-      "available_gb": 312.02,
-      "available_mb": 319505.23,
+      "available_bytes": 334570467328,
+      "available_gb": 311.59,
+      "available_mb": 319071.26,
       "total_bytes": 405389791232,
       "total_gb": 377.55,
       "total_mb": 386609.83
@@ -362,11 +362,14 @@ WARNING:root:imports error
     ],
     "motherboard": {
       "chipset": "Intel Corporation Device",
+      "manufacturer": "Supermicro",
+      "model_name": "X13DEG-QT",
       "pcie": {
-        "max_lane_width": "x255",
+        "max_lane_width": "x16",
         "max_link_generation": "Gen5",
         "max_link_speed": "32.0 GT/s PCIe"
-      }
+      },
+      "version": "1.10"
     },
     "npus": [
       {
