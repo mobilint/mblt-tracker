@@ -1353,17 +1353,32 @@ def _extract_chipset_from_pcie_devices(
 ) -> str | None:
     preferred_classes = ("0600", "0601", "0604", "0c05")
     keywords = ("chipset", "host bridge", "isa bridge", "lpc", "smbus", "root port")
+    candidates: list[tuple[int, str]] = []
     for device in pcie_devices:
         class_code = _normalize_hex(str(device.get("class", ""))) or ""
         text = " ".join(
             str(device.get(key, "")) for key in ("manufacturer", "name")
         ).strip()
+        chipset = _clean_hardware_string(text)
+        if chipset is None or _is_generic_chipset_label(chipset):
+            continue
+
         lowered = text.lower()
-        if class_code.startswith(preferred_classes) or any(k in lowered for k in keywords):
-            chipset = _clean_hardware_string(text)
-            if chipset is not None:
-                return chipset
-    return None
+        has_keyword = any(k in lowered for k in keywords)
+        has_preferred_class = class_code.startswith(preferred_classes)
+        if has_keyword or has_preferred_class:
+            candidates.append((0 if has_keyword else 1, chipset))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda candidate: candidate[0])[1]
+
+
+def _is_generic_chipset_label(label: str) -> bool:
+    """Return true for non-actionable PCI labels such as ``Intel Corporation Device``."""
+    normalized = re.sub(r"\s+", " ", label).strip().lower()
+    if normalized in {"device", "unknown device"}:
+        return True
+    return bool(re.fullmatch(r"(?:[\w.,&()\-]+\s+)*(?:corporation|inc\.?|ltd\.?)?\s*device(?:\s+[0-9a-f]{4})?", normalized))
 
 
 def _summarize_motherboard_pcie(

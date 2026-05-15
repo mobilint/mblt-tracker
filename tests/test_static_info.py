@@ -594,6 +594,44 @@ def test_extract_chipset_continues_after_unlabeled_bridge() -> None:
     assert chipset == "Intel Corporation SMBus Controller"
 
 
+def test_extract_chipset_prefers_specific_keyword_over_generic_bridge() -> None:
+    chipset = static_info._extract_chipset_from_pcie_devices(
+        [
+            {
+                "class": "0x060000",
+                "manufacturer": "Intel Corporation",
+                "name": "Device",
+            },
+            {
+                "class": "0x0c0500",
+                "manufacturer": "Intel Corporation",
+                "name": "SMBus - 7A23",
+            },
+        ]
+    )
+
+    assert chipset == "Intel Corporation SMBus - 7A23"
+
+
+def test_extract_chipset_skips_generic_device_labels() -> None:
+    chipset = static_info._extract_chipset_from_pcie_devices(
+        [
+            {
+                "class": "0x060000",
+                "manufacturer": "Intel Corporation",
+                "name": "Device",
+            },
+            {
+                "class": "0x060400",
+                "manufacturer": "Vendor",
+                "name": "Device 1234",
+            },
+        ]
+    )
+
+    assert chipset is None
+
+
 def test_parse_linux_dmidecode_memory_omits_sensitive_fields_from_summary() -> None:
     output = """
 Handle 0x0038, DMI type 17, 92 bytes
