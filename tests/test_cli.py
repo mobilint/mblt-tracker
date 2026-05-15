@@ -187,6 +187,8 @@ def test_collect_static_info_removes_os_link_fields_for_nvml_gpu_match(
                         "max_link_width": "16",
                         "link_generation": "Gen3",
                         "lane_width": "x4",
+                        "max_link_generation": "Gen4",
+                        "max_lane_width": "x16",
                     }
                 ]
             }
@@ -206,6 +208,8 @@ def test_collect_static_info_removes_os_link_fields_for_nvml_gpu_match(
                         "driver_version": "595.97",
                         "link_generation": "Gen2",
                         "lane_width": "x4",
+                        "max_link_generation": "Gen4",
+                        "max_lane_width": "x16",
                         "name": "NVIDIA GeForce RTX 3090",
                     }
                 ]
@@ -227,6 +231,8 @@ def test_collect_static_info_removes_os_link_fields_for_nvml_gpu_match(
                     "driver_version": "595.97",
                     "link_generation": "Gen2",
                     "lane_width": "x4",
+                    "max_link_generation": "Gen4",
+                    "max_lane_width": "x16",
                     "name": "NVIDIA GeForce RTX 3090",
                 }
             ]

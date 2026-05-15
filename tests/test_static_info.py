@@ -122,6 +122,14 @@ def test_get_nvml_gpu_static_info_returns_metadata(monkeypatch) -> None:
             assert handle == "handle-0"
             return 16
 
+        def nvmlDeviceGetMaxPcieLinkGeneration(self, handle: str) -> int:
+            assert handle == "handle-0"
+            return 4
+
+        def nvmlDeviceGetMaxPcieLinkWidth(self, handle: str) -> int:
+            assert handle == "handle-0"
+            return 16
+
     fake_nvml = FakeNvml()
     monkeypatch.setitem(sys.modules, "pynvml", fake_nvml)
     monkeypatch.setattr(static_info.platform, "system", lambda: "Linux")
@@ -134,6 +142,8 @@ def test_get_nvml_gpu_static_info_returns_metadata(monkeypatch) -> None:
             "class": "0x030000",
             "current_link_speed": "2.5 GT/s PCIe",
             "current_link_width": "16",
+            "max_link_speed": "32.0 GT/s PCIe",
+            "max_link_width": "8",
         }
     ]
 
@@ -151,6 +161,8 @@ def test_get_nvml_gpu_static_info_returns_metadata(monkeypatch) -> None:
                     "architecture": "Ada Lovelace",
                     "lane_width": "x16",
                     "link_generation": "Gen1",
+                    "max_lane_width": "x16",
+                    "max_link_generation": "Gen4",
                     "memory_total_bytes": 24 * 1024**3,
                     "name": "NVIDIA RTX Test",
                     "vendor_id": "0x10de",
@@ -222,6 +234,12 @@ def test_get_nvml_gpu_static_info_matches_windows_pcie_by_nvidia_order(
         def nvmlDeviceGetCurrPcieLinkWidth(self, _handle: str) -> int:
             return 4
 
+        def nvmlDeviceGetMaxPcieLinkGeneration(self, _handle: str) -> int:
+            return 4
+
+        def nvmlDeviceGetMaxPcieLinkWidth(self, _handle: str) -> int:
+            return 16
+
     monkeypatch.setitem(sys.modules, "pynvml", FakeNvml())
     monkeypatch.setattr(static_info.platform, "system", lambda: "Windows")
 
@@ -245,6 +263,8 @@ def test_get_nvml_gpu_static_info_matches_windows_pcie_by_nvidia_order(
             "manufacturer": "NVIDIA",
             "current_link_speed": "8.0 GT/s PCIe",
             "current_link_width": "4",
+            "max_link_speed": "32.0 GT/s PCIe",
+            "max_link_width": "8",
         }
     ]
 
@@ -260,6 +280,8 @@ def test_get_nvml_gpu_static_info_matches_windows_pcie_by_nvidia_order(
             "lane_width": "x4",
             "link_generation": "Gen3",
             "manufacturer": "NVIDIA",
+            "max_lane_width": "x16",
+            "max_link_generation": "Gen4",
             "memory_total_bytes": 24 * 1024**3,
             "name": "NVIDIA GeForce RTX 3090",
             "vendor_id": "0x10de",

@@ -112,7 +112,7 @@ mblt-tracker collect --pcie-vendor-id 1ed5 --pcie-device-id 0100
 mblt-tracker collect --pcie-class-filter 0x12
 ```
 
-The CLI output is a JSON document containing best-effort host CPU, DRAM, motherboard, OS, GPU, NPU, driver, and PCIe information. NVIDIA GPU entries are sourced from NVML and enriched with PCIe metadata where available. On Linux, PCIe information is read from sysfs. On Windows, PCI devices are collected through PowerShell/CIM/PnP queries.
+The CLI output is a JSON document containing best-effort host CPU, DRAM, motherboard, OS, GPU, NPU, driver, and PCIe information. For NVIDIA GPU entries, NVML is the source of truth for GPU identity and PCIe link metadata; OS PCIe discovery is used only to attach non-link PCIe identifiers and descriptive fields where available. On Linux, non-NVIDIA PCIe information is read from sysfs. On Windows, non-NVIDIA PCI devices are collected through PowerShell/CIM/PnP queries.
 
 ### Example Output
 
@@ -660,7 +660,7 @@ Uses **NVML** (via `nvidia-ml-py`) for high-fidelity hardware monitoring.
 - **Features**: Tracks total system GPU usage or specific indices (e.g., `GPUDeviceTracker(gpu_id=[0, 1])`).
 - **Dependencies**: Requires NVIDIA Drivers and NVML library installed.
 - **Temperature**: Reads on-die GPU temperature through NVML.
-- **Static Info**: `GPUDeviceTracker.get_static_info()` reports the detected GPU count, tracked device names, NVIDIA driver version, and the raw NVML CUDA driver version. The `mblt-tracker collect` CLI provides richer NVML-discovered GPU metadata enriched with PCIe device/link information when available.
+- **Static Info**: `GPUDeviceTracker.get_static_info()` reports the detected GPU count, tracked device names, NVIDIA driver version, and the raw NVML CUDA driver version. The `mblt-tracker collect` CLI provides richer NVML-discovered GPU metadata; for NVIDIA GPUs, PCIe link generation/width fields come from NVML, while OS PCIe discovery may add non-link identifiers and descriptive metadata.
 
 ### Host DRAM
 
@@ -765,7 +765,7 @@ Typical fields include:
 - `inference.os`: OS name, version, and kernel version
 - `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
 - `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names
-- `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices enriched with PCIe vendor/device IDs plus current and maximum link generation/width information where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
+- `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices. For NVIDIA GPUs, current and maximum PCIe link generation/width fields are sourced from NVML; OS PCIe discovery may add non-link fields such as vendor/device IDs and descriptive metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
 - `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, current/maximum link information, and firmware metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
 - `hardware.npus[].card_model`: best-effort Mobilint card model classification such as `MLA100` or `MLA400` when `mobilint-cli status -q` exposes enough information
 - `hardware.npus[].card_id`: logical NPU card ID used by `NPUDeviceTracker(npu_id=...)`; MLA400 Aries chips share the same card ID

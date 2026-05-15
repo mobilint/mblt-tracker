@@ -282,6 +282,24 @@ def _get_nvml_device_static_metadata(
         if width is not None and width > 0:
             metadata["nvml_lane_width"] = f"x{width}"
 
+    try:
+        max_link_generation = nvml.nvmlDeviceGetMaxPcieLinkGeneration(handle)
+    except Exception:
+        pass
+    else:
+        generation = _to_int(max_link_generation)
+        if generation is not None and generation > 0:
+            metadata["nvml_max_link_generation"] = f"Gen{generation}"
+
+    try:
+        max_link_width = nvml.nvmlDeviceGetMaxPcieLinkWidth(handle)
+    except Exception:
+        pass
+    else:
+        width = _to_int(max_link_width)
+        if width is not None and width > 0:
+            metadata["nvml_max_lane_width"] = f"x{width}"
+
     return metadata
 
 
@@ -305,7 +323,7 @@ def _nvml_architecture_to_name(value: object) -> str | None:
 
 
 def _remove_os_pcie_link_fields(device: dict[str, object]) -> None:
-    """Remove OS-level PCIe link fields when NVML is used as GPU source of truth."""
+    """Remove OS PCIe link fields before applying NVML-sourced GPU link metadata."""
     for key in (
         "current_link_speed",
         "current_link_width",
@@ -313,6 +331,8 @@ def _remove_os_pcie_link_fields(device: dict[str, object]) -> None:
         "max_link_width",
         "link_generation",
         "lane_width",
+        "max_link_generation",
+        "max_lane_width",
     ):
         device.pop(key, None)
 
@@ -2128,11 +2148,15 @@ def _format_pcie_device(
         formatted["lane_width"] = device["nvml_lane_width"]
     elif device.get("current_link_width") is not None:
         formatted["lane_width"] = f"x{device['current_link_width']}"
-    if device.get("max_link_speed") is not None:
+    if device.get("nvml_max_link_generation") is not None:
+        formatted["max_link_generation"] = device["nvml_max_link_generation"]
+    elif device.get("max_link_speed") is not None:
         max_generation = _link_speed_to_generation(str(device["max_link_speed"]))
         if max_generation is not None:
             formatted["max_link_generation"] = max_generation
-    if device.get("max_link_width") is not None:
+    if device.get("nvml_max_lane_width") is not None:
+        formatted["max_lane_width"] = device["nvml_max_lane_width"]
+    elif device.get("max_link_width") is not None:
         max_lane_width = _format_max_lane_width(device["max_link_width"])
         if max_lane_width is not None:
             formatted["max_lane_width"] = max_lane_width
