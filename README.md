@@ -24,9 +24,9 @@
 - **Comprehensive Metrics**: Capture Power (Watts), Utilization (%), Memory Usage (MB/%), and Temperature (C).
 - **Statistical Summaries**: Automatically calculates averages, peaks (max), and p99 values.
 - **Time-Series Traces**: Export raw data for custom plotting and analysis.
-- **Static Metadata**: Collect best-effort host, OS, PCIe, driver, firmware, and device information for reproducible benchmarks.
+- **Static Metadata**: Collect best-effort host, OS, CPU, DRAM capacity/type/speed, motherboard, PCIe, driver, firmware, and device information for reproducible benchmarks.
 - **CLI Collection Tool**: Use `mblt-tracker collect` to export static host and PCIe information as JSON.
-- **PCIe Discovery**: Detect GPU/NPU-related PCIe devices on Linux and Windows, including link speed/width where available.
+- **PCIe Discovery**: Detect GPU/NPU-related PCIe devices on Linux and Windows, including current and maximum link speed/width where available.
 - **Lightweight**: Minimal overhead, designed for production and research environments.
 
 ---
@@ -112,41 +112,70 @@ mblt-tracker collect --pcie-vendor-id 1ed5 --pcie-device-id 0100
 mblt-tracker collect --pcie-class-filter 0x12
 ```
 
-The CLI output is a JSON document containing best-effort host CPU, DRAM, OS, GPU, NPU, driver, and PCIe information. NVIDIA GPU entries are sourced from NVML and enriched with PCIe metadata where available. On Linux, PCIe information is read from sysfs. On Windows, PCI devices are collected through PowerShell/CIM/PnP queries.
+The CLI output is a JSON document containing best-effort host CPU, DRAM, motherboard, OS, GPU, NPU, driver, and PCIe information. For NVIDIA GPU entries, NVML is the source of truth for GPU identity and PCIe link metadata; OS PCIe discovery is used only to attach non-link PCIe identifiers and descriptive fields where available. On Linux, non-NVIDIA PCIe information is read from sysfs. On Windows, non-NVIDIA PCI devices are collected through PowerShell/CIM/PnP queries.
 
 ### Example Output
 
 The following examples show representative `mblt-tracker collect` outputs across
 Windows and Linux systems. Public static output intentionally omits
-privacy-sensitive host and device instance identifiers: DRAM DIMM
-serial/part/manufacturer details are not collected, and PCIe `bus_address` /
-Windows `pnp_device_id` are not exposed, including when `--all-pcie-devices` is
-used.
+privacy-sensitive host and device instance identifiers: DRAM DIMM part/serial
+numbers, motherboard serial/asset tags, and PCIe `bus_address` / Windows
+`pnp_device_id` are not exposed, including when `--all-pcie-devices` is used.
+DRAM byte counts are accompanied by MB/GB display units; DRAM speed, type,
+module capacity, and estimated theoretical bandwidth are kept to make benchmark results easier to
+interpret.
 
 #### Windows host with Intel UHD Graphics, NVIDIA RTX 3090, and Mobilint NPU
 
 ```bash
 $ mblt-tracker collect
-WARNING:root:imports error
- You need to install pymongo>=3.9.0 in order to use MongoOutput
-WARNING:root:imports error
-  You need to install pandas>=0.25.1 in order to use DataFrameOutput
+WARNING:root:imports error 
+ You need to install pymongo>=3.9.0 in order to use MongoOutput 
+WARNING:root:imports error 
+  You need to install pandas>=0.25.1 in order to use DataFrameOutput 
 {
   "hardware": {
     "cpu": {
       "architecture": "AMD64",
-      "logical_cores": 20,
       "model_name": "13th Gen Intel(R) Core(TM) i5-13500",
-      "physical_cores": 14,
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 15008358400,
+      "available_bytes": 15580520448,
+      "available_gb": 14.51,
+      "available_mb": 14858.74,
       "configured_speed_mhz": 5600,
+      "module_count": 2,
+      "modules": [
+        {
+          "capacity_bytes": 17179869184,
+          "capacity_gb": 16.0,
+          "capacity_mb": 16384.0,
+          "configured_speed_mhz": 5600,
+          "data_width_bits": 64,
+          "ram_type": "DDR5",
+          "speed_mhz": 5600,
+          "theoretical_bandwidth_gbps": 44.8,
+          "total_width_bits": 64
+        },
+        {
+          "capacity_bytes": 17179869184,
+          "capacity_gb": 16.0,
+          "capacity_mb": 16384.0,
+          "configured_speed_mhz": 5600,
+          "data_width_bits": 64,
+          "ram_type": "DDR5",
+          "speed_mhz": 5600,
+          "theoretical_bandwidth_gbps": 44.8,
+          "total_width_bits": 64
+        }
+      ],
       "ram_type": "DDR5",
       "speed_mhz": 5600,
       "theoretical_bandwidth_gbps": 89.6,
-      "total_bytes": 34113015808
+      "total_bytes": 34113015808,
+      "total_gb": 31.77,
+      "total_mb": 32532.71
     },
     "gpus": [
       {
@@ -175,8 +204,10 @@ WARNING:root:imports error
         "driver_provider": "NVIDIA",
         "driver_version": "595.97",
         "lane_width": "x4",
-        "link_generation": "Gen1",
+        "link_generation": "Gen2",
         "manufacturer": "NVIDIA",
+        "max_lane_width": "x16",
+        "max_link_generation": "Gen4",
         "memory_total_bytes": 25769803776,
         "name": "NVIDIA GeForce RTX 3090",
         "revision": "0xa1",
@@ -186,6 +217,17 @@ WARNING:root:imports error
         "vendor_id": "0x10de"
       }
     ],
+    "motherboard": {
+      "chipset": "INTEL Intel(R) SMBus - 7A23",
+      "manufacturer": "Micro-Star International Co., Ltd.",
+      "model_name": "MAG B760 TOMAHAWK WIFI (MS-7D96)",
+      "pcie": {
+        "max_lane_width": "x16",
+        "max_link_generation": "Gen4",
+        "max_link_speed": "16.0 GT/s PCIe"
+      },
+      "version": "2.0"
+    },
     "npus": [
       {
         "class": "0x078000",
@@ -199,6 +241,8 @@ WARNING:root:imports error
         "lane_width": "x8",
         "link_generation": "Gen4",
         "manufacturer": "MOBILINT, Inc.",
+        "max_lane_width": "x8",
+        "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "name": "MOBILINT NPU Accelerator",
@@ -256,14 +300,16 @@ WARNING:root:imports error
   "hardware": {
     "cpu": {
       "architecture": "x86_64",
-      "logical_cores": 96,
       "model_name": "INTEL(R) XEON(R) GOLD 6542Y",
-      "physical_cores": 48,
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 321193263104,
-      "total_bytes": 405389791232
+      "available_bytes": 322689507328,
+      "available_gb": 300.53,
+      "available_mb": 307740.7,
+      "total_bytes": 405389791232,
+      "total_gb": 377.55,
+      "total_mb": 386609.83
     },
     "gpus": [
       {
@@ -286,6 +332,8 @@ WARNING:root:imports error
         "lane_width": "x16",
         "link_generation": "Gen1",
         "manufacturer": "NVIDIA Corporation",
+        "max_lane_width": "x16",
+        "max_link_generation": "Gen5",
         "memory_total_bytes": 102641958912,
         "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
         "revision": "0xa1",
@@ -300,8 +348,10 @@ WARNING:root:imports error
         "device_id": "0x2bb1",
         "driver_version": "580.95.05",
         "lane_width": "x16",
-        "link_generation": "Gen5",
+        "link_generation": "Gen1",
         "manufacturer": "NVIDIA Corporation",
+        "max_lane_width": "x16",
+        "max_link_generation": "Gen5",
         "memory_total_bytes": 102641958912,
         "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
         "revision": "0xa1",
@@ -310,6 +360,17 @@ WARNING:root:imports error
         "vendor_id": "0x10de"
       }
     ],
+    "motherboard": {
+      "chipset": "ASPEED Technology, Inc. AST1150 PCI-to-PCI Bridge",
+      "manufacturer": "Supermicro",
+      "model_name": "X13DEG-QT",
+      "pcie": {
+        "max_lane_width": "x16",
+        "max_link_generation": "Gen5",
+        "max_link_speed": "32.0 GT/s PCIe"
+      },
+      "version": "1.10"
+    },
     "npus": [
       {
         "board_name": "aries0",
@@ -327,6 +388,8 @@ WARNING:root:imports error
         "lane_width": "8",
         "link_generation": "4",
         "manufacturer": "Mobilint, Inc.",
+        "max_lane_width": "x8",
+        "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
@@ -390,14 +453,27 @@ Warning: NVML not available. GPU information will not be collected.
   "hardware": {
     "cpu": {
       "architecture": "x86_64",
-      "logical_cores": 16,
-      "model_name": "11th Gen Intel(R) Core(TM) i7-11700K @ 3.60GHz",
-      "physical_cores": 8,
+      "model_name": "13th Gen Intel(R) Core(TM) i5-13600K",
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 15901192192,
-      "total_bytes": 67178881024
+      "available_bytes": 27281420288,
+      "available_gb": 25.41,
+      "available_mb": 26017.59,
+      "total_bytes": 33379606528,
+      "total_gb": 31.09,
+      "total_mb": 31833.27
+    },
+    "motherboard": {
+      "chipset": "Intel Corporation Raptor Lake PCI Express Root Port #25",
+      "manufacturer": "ASUSTeK COMPUTER INC.",
+      "model_name": "ROG STRIX B760-I GAMING WIFI",
+      "pcie": {
+        "max_lane_width": "x16",
+        "max_link_generation": "Gen5",
+        "max_link_speed": "32.0 GT/s PCIe"
+      },
+      "version": "Rev 1.xx"
     },
     "npus": [
       {
@@ -415,11 +491,13 @@ Warning: NVML not available. GPU information will not be collected.
         },
         "lane_width": "8",
         "link_generation": "4",
-        "manufacturer": "Mobilint, Inc.",
+        "manufacturer": "MOBILINT, Inc.",
+        "max_lane_width": "x8",
+        "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
-        "name": "Aries",
+        "name": "MOBILINT NPU Accelerator",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -441,11 +519,13 @@ Warning: NVML not available. GPU information will not be collected.
         },
         "lane_width": "8",
         "link_generation": "4",
-        "manufacturer": "Mobilint, Inc.",
+        "manufacturer": "MOBILINT, Inc.",
+        "max_lane_width": "x8",
+        "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
-        "name": "Aries",
+        "name": "MOBILINT NPU Accelerator",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -467,11 +547,13 @@ Warning: NVML not available. GPU information will not be collected.
         },
         "lane_width": "8",
         "link_generation": "4",
-        "manufacturer": "Mobilint, Inc.",
+        "manufacturer": "MOBILINT, Inc.",
+        "max_lane_width": "x8",
+        "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
-        "name": "Aries",
+        "name": "MOBILINT NPU Accelerator",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -493,11 +575,13 @@ Warning: NVML not available. GPU information will not be collected.
         },
         "lane_width": "8",
         "link_generation": "4",
-        "manufacturer": "Mobilint, Inc.",
+        "manufacturer": "MOBILINT, Inc.",
+        "max_lane_width": "x8",
+        "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
-        "name": "Aries",
+        "name": "MOBILINT NPU Accelerator",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -522,9 +606,9 @@ Warning: NVML not available. GPU information will not be collected.
     },
     "npu_driver_version": "1.12.0",
     "os": {
-      "kernel_version": "6.17.0-20-generic",
+      "kernel_version": "6.17.0-23-generic",
       "name": "Linux",
-      "version": "Ubuntu 24.04.2 LTS"
+      "version": "Ubuntu 24.04.4 LTS"
     },
     "qbcompiler": {
       "version": "not_installed"
@@ -546,7 +630,7 @@ Warning: NVML not available. GPU information will not be collected.
 | **Utilization (%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
 | **Memory (MB/%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
 | **Temperature (C)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Static Info** | ✅ Host/OS/DRAM | ✅ Host/OS/DRAM | ✅ NVML + PCIe | ✅ PCIe + `mobilint-cli` |
+| **Static Info** | ✅ Host/OS/DRAM/Motherboard | ✅ Host/OS/DRAM/Motherboard | ✅ NVML + PCIe | ✅ PCIe + `mobilint-cli` |
 | **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (Logical NPU Cards) |
 
 ---
@@ -567,7 +651,7 @@ Uses **pyRAPL** for power measurements and **psutil** for utilization/memory.
 
 - **Features**: Tracks total system CPU usage or specific indices (e.g., `CPUDeviceTracker(cpu_id=[0, 1])`).
 - **Temperature**: Uses `psutil.sensors_temperatures()` when the platform exposes CPU thermal sensors.
-- **Static Info**: Reports CPU architecture, model, vendor, physical/logical cores, DRAM capacity, OS details, and Linux CPU governor when available.
+- **Static Info**: Reports CPU architecture, model, vendor, DRAM capacity/type/speed, motherboard metadata, OS details, and CPU power policy when available.
 
 ### NVIDIA GPU
 
@@ -576,7 +660,7 @@ Uses **NVML** (via `nvidia-ml-py`) for high-fidelity hardware monitoring.
 - **Features**: Tracks total system GPU usage or specific indices (e.g., `GPUDeviceTracker(gpu_id=[0, 1])`).
 - **Dependencies**: Requires NVIDIA Drivers and NVML library installed.
 - **Temperature**: Reads on-die GPU temperature through NVML.
-- **Static Info**: `GPUDeviceTracker.get_static_info()` reports the detected GPU count, tracked device names, NVIDIA driver version, and the raw NVML CUDA driver version. The `mblt-tracker collect` CLI provides richer NVML-discovered GPU metadata enriched with PCIe device/link information when available.
+- **Static Info**: `GPUDeviceTracker.get_static_info()` reports the detected GPU count, tracked device names, NVIDIA driver version, and the raw NVML CUDA driver version. The `mblt-tracker collect` CLI provides richer NVML-discovered GPU metadata; for NVIDIA GPUs, PCIe link generation/width fields come from NVML, while OS PCIe discovery may add non-link identifiers and descriptive metadata.
 
 ### Host DRAM
 
@@ -587,7 +671,7 @@ Uses the **Intel RAPL DRAM domain** through `pyRAPL` for host DRAM power measure
 - **Features**: Tracks all detected CPU socket DRAM domains by default, or specific socket IDs with `DRAMDeviceTracker(socket_id=0)` / `DRAMDeviceTracker(socket_id=[0, 1])`.
 - **Metrics**: Reports total host DRAM power through standard keys (`avg_power_w`, `p99_power_w`, `max_power_w`) and DRAM-specific aliases (`avg_dram_power_w`, `p99_dram_power_w`, `max_dram_power_w`). Per-socket statistics are returned under `metrics["dram"]`.
 - **Trace**: `DRAMDeviceTracker.get_trace()` returns total host DRAM power as `list[(timestamp, power_w)]`.
-- **Static Info**: `DRAMDeviceTracker.get_static_info()` returns the same privacy-first host CPU, aggregate DRAM capacity, and OS metadata as host static collection. Individual DIMM identifiers are not collected.
+- **Static Info**: `DRAMDeviceTracker.get_static_info()` returns the same privacy-first host CPU, aggregate DRAM capacity with MB/GB display units, optional DIMM capacity/type/speed summaries, motherboard metadata, and OS metadata as host static collection. Individual DIMM identifiers are not exposed.
 
 ### Mobilint NPU
 
@@ -674,13 +758,15 @@ Static information is collected on a best-effort, privacy-first basis and may va
 
 Typical fields include:
 
-- `hardware.cpu`: CPU architecture, model name, vendor, physical cores, logical cores
-- `hardware.dram`: total and available memory in bytes, plus optional privacy-safe aggregate fields such as `ram_type`, `speed_mhz`, `configured_speed_mhz`, and `theoretical_bandwidth_gbps` when available. Individual DIMM serial numbers, part numbers, manufacturers, and `hardware.dram.dimms` are not collected or exposed.
+- `hardware.cpu`: CPU architecture, model name, and vendor
+- `hardware.dram`: total and available memory in bytes plus `total_mb`, `total_gb`, `available_mb`, and `available_gb`; optional privacy-safe aggregate fields include `ram_type`, `speed_mhz`, `configured_speed_mhz`, `module_count`, `modules`, and `theoretical_bandwidth_gbps` when available. Per-module entries may include `capacity_bytes`, `capacity_mb`, `capacity_gb`, DDR type, speed, width, and estimated bandwidth. Individual DIMM serial numbers, part numbers, and PCIe/device instance identifiers are not exposed.
+- `hardware.motherboard`: optional baseboard `manufacturer`, `model_name`, `version`, best-effort `chipset`, and `pcie` support/capability summary. Motherboard serial numbers, asset tags, PCI bus addresses, and Windows instance IDs are not exposed.
+- `hardware.motherboard.pcie`: optional maximum PCIe generation/speed/lane-width summary.
 - `inference.os`: OS name, version, and kernel version
 - `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
 - `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names
-- `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices enriched with PCIe vendor/device IDs and link information where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
-- `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, link information, and firmware metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
+- `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices. For NVIDIA GPUs, current and maximum PCIe link generation/width fields are sourced from NVML; OS PCIe discovery may add non-link fields such as vendor/device IDs and descriptive metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
+- `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, current/maximum link information, and firmware metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
 - `hardware.npus[].card_model`: best-effort Mobilint card model classification such as `MLA100` or `MLA400` when `mobilint-cli status -q` exposes enough information
 - `hardware.npus[].card_id`: logical NPU card ID used by `NPUDeviceTracker(npu_id=...)`; MLA400 Aries chips share the same card ID
 - `inference.gpu`: NVIDIA driver and CUDA driver versions. The CLI normalizes the CUDA driver version as a string such as `"13.0"`; `GPUDeviceTracker.get_static_info()` returns the raw NVML CUDA driver integer.

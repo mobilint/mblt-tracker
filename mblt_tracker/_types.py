@@ -3,12 +3,14 @@ from __future__ import annotations
 from typing import TypedDict
 
 
-class CpuHardwareInfo(TypedDict):
+class _CpuHardwareInfoRequired(TypedDict):
     architecture: str
-    physical_cores: int | None
-    logical_cores: int | None
     model_name: str | None
     vendor: str | None
+
+
+class CpuHardwareInfo(_CpuHardwareInfoRequired):
+    pass
 
 
 class DramInfo(TypedDict):
@@ -16,11 +18,29 @@ class DramInfo(TypedDict):
     available_bytes: int
 
 
+class DramModuleInfo(TypedDict, total=False):
+    capacity_bytes: int
+    capacity_mb: float
+    capacity_gb: float
+    ram_type: str
+    speed_mhz: int
+    configured_speed_mhz: int
+    data_width_bits: int
+    total_width_bits: int
+    theoretical_bandwidth_gbps: float
+
+
 class DramInfoOptional(DramInfo, total=False):
+    total_mb: float
+    total_gb: float
+    available_mb: float
+    available_gb: float
     ram_type: str
     speed_mhz: int
     configured_speed_mhz: int
     theoretical_bandwidth_gbps: float
+    module_count: int
+    modules: list[DramModuleInfo]
 
 
 class CpuPowerPolicy(TypedDict):
@@ -93,6 +113,8 @@ PcieDeviceInfo = TypedDict(
         "max_link_width": str,
         "link_generation": str,
         "lane_width": str,
+        "max_link_generation": str,
+        "max_lane_width": str,
         "memory_total_bytes": int,
         "architecture": str,
     },
@@ -107,6 +129,20 @@ class NpuDeviceInfo(PcieDeviceInfo, total=False):
     firmware: NpuFirmwareInfo
 
 
+class MotherboardPcieInfo(TypedDict, total=False):
+    max_link_generation: str
+    max_link_speed: str
+    max_lane_width: str
+
+
+class MotherboardInfo(TypedDict, total=False):
+    manufacturer: str
+    model_name: str
+    version: str
+    chipset: str
+    pcie: MotherboardPcieInfo
+
+
 class _HardwareInfoRequired(TypedDict):
     cpu: CpuHardwareInfo
     dram: DramInfoOptional
@@ -115,6 +151,7 @@ class _HardwareInfoRequired(TypedDict):
 class HardwareInfo(_HardwareInfoRequired, total=False):
     gpu: GpuHardwareInfoOptional
     gpus: list[PcieDeviceInfo]
+    motherboard: MotherboardInfo
     npus: list[NpuDeviceInfo]
     pcie_devices: list[PcieDeviceInfo]
 
@@ -145,9 +182,12 @@ STATIC_INFO_CHILD_SCHEMAS: dict[type, dict[str, object]] = {
         "dram": DramInfoOptional,
         "gpu": GpuHardwareInfoOptional,
         "gpus": [PcieDeviceInfo],
+        "motherboard": MotherboardInfo,
         "npus": [NpuDeviceInfo],
         "pcie_devices": [PcieDeviceInfo],
     },
+    DramInfoOptional: {"modules": [DramModuleInfo]},
+    MotherboardInfo: {"pcie": MotherboardPcieInfo},
     GpuHardwareInfoOptional: {"devices": [GpuStaticDeviceInfo]},
     InferenceInfo: {
         "cpu": CpuPowerPolicy,

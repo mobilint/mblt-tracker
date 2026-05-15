@@ -31,14 +31,15 @@ def collect_static_info(
     sudo_password_provider: Callable[[], str] | None = None,
 ) -> CollectOutput:
     """Collect best-effort static host and PCIe information."""
+    pcie_devices = get_all_pcie_devices()
     info = cast(
         dict[str, object],
         get_host_static_info(
             sudo_password=sudo_password,
             sudo_password_provider=sudo_password_provider,
+            pcie_devices=pcie_devices,
         ),
     )
-    pcie_devices = get_all_pcie_devices()
     pcie_info = get_pcie_static_info(
         vendor_id=pcie_vendor_id,
         device_id=pcie_device_id,

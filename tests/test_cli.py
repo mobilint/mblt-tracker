@@ -87,7 +87,7 @@ def test_collect_static_info_merges_windows_npu_driver_metadata(monkeypatch) -> 
     monkeypatch.setattr(
         cli,
         "get_host_static_info",
-        lambda sudo_password=None, sudo_password_provider=None: {
+        lambda sudo_password=None, sudo_password_provider=None, pcie_devices=None: {
             "hardware": {"cpu": {"architecture": "AMD64"}}
         },
     )
@@ -127,7 +127,7 @@ def test_collect_static_info_merges_linux_npu_driver_firmware_metadata(
     monkeypatch.setattr(
         cli,
         "get_host_static_info",
-        lambda sudo_password=None, sudo_password_provider=None: {
+        lambda sudo_password=None, sudo_password_provider=None, pcie_devices=None: {
             "hardware": {"cpu": {"architecture": "x86_64"}}
         },
     )
@@ -167,7 +167,7 @@ def test_collect_static_info_removes_os_link_fields_for_nvml_gpu_match(
     monkeypatch.setattr(
         cli,
         "get_host_static_info",
-        lambda sudo_password=None, sudo_password_provider=None: {"hardware": {}},
+        lambda sudo_password=None, sudo_password_provider=None, pcie_devices=None: {"hardware": {}},
     )
     monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
     monkeypatch.setattr(
@@ -187,6 +187,8 @@ def test_collect_static_info_removes_os_link_fields_for_nvml_gpu_match(
                         "max_link_width": "16",
                         "link_generation": "Gen3",
                         "lane_width": "x4",
+                        "max_link_generation": "Gen4",
+                        "max_lane_width": "x16",
                     }
                 ]
             }
@@ -206,6 +208,8 @@ def test_collect_static_info_removes_os_link_fields_for_nvml_gpu_match(
                         "driver_version": "595.97",
                         "link_generation": "Gen2",
                         "lane_width": "x4",
+                        "max_link_generation": "Gen4",
+                        "max_lane_width": "x16",
                         "name": "NVIDIA GeForce RTX 3090",
                     }
                 ]
@@ -227,6 +231,8 @@ def test_collect_static_info_removes_os_link_fields_for_nvml_gpu_match(
                     "driver_version": "595.97",
                     "link_generation": "Gen2",
                     "lane_width": "x4",
+                    "max_link_generation": "Gen4",
+                    "max_lane_width": "x16",
                     "name": "NVIDIA GeForce RTX 3090",
                 }
             ]
@@ -247,7 +253,7 @@ def test_collect_static_info_passes_pcie_filters_to_npu_metadata_helpers(
     monkeypatch.setattr(
         cli,
         "get_host_static_info",
-        lambda sudo_password=None, sudo_password_provider=None: {"hardware": {}},
+        lambda sudo_password=None, sudo_password_provider=None, pcie_devices=None: {"hardware": {}},
     )
     monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: pcie_devices)
     monkeypatch.setattr(cli, "get_pcie_static_info", lambda **_kwargs: pcie_info)
@@ -287,7 +293,7 @@ def test_collect_static_info_does_not_limit_npu_metadata_without_pcie_filter(
     monkeypatch.setattr(
         cli,
         "get_host_static_info",
-        lambda sudo_password=None, sudo_password_provider=None: {"hardware": {}},
+        lambda sudo_password=None, sudo_password_provider=None, pcie_devices=None: {"hardware": {}},
     )
     monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
     monkeypatch.setattr(cli, "get_pcie_static_info", lambda **_kwargs: {})
@@ -309,7 +315,7 @@ def test_collect_static_info_does_not_add_unfiltered_npu_metadata(monkeypatch) -
     monkeypatch.setattr(
         cli,
         "get_host_static_info",
-        lambda sudo_password=None, sudo_password_provider=None: {"hardware": {}},
+        lambda sudo_password=None, sudo_password_provider=None, pcie_devices=None: {"hardware": {}},
     )
     monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
     monkeypatch.setattr(cli, "get_pcie_static_info", lambda **_kwargs: {})

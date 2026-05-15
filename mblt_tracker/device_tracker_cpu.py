@@ -292,7 +292,7 @@ class CPUDeviceTracker(BaseDeviceTracker):
         return list(self._power_trace)
 
     def get_static_info(self) -> dict[str, object]:
-        """Return best-effort host CPU, DRAM, and OS static information."""
+        """Return expanded host CPU, DRAM, motherboard, and OS static info."""
         return get_host_static_info()
 
     def get_util_trace(self) -> list[tuple[float, float]]:
