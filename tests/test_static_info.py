@@ -398,9 +398,6 @@ def test_read_dram_summary_windows_parses_safe_cim_json(monkeypatch) -> None:
     output = """
     [
       {
-        "Manufacturer": "Samsung",
-        "PartNumber": "M323R2GA3PB0-CWMOL",
-        "SerialNumber": "48A201A4",
         "Capacity": "8589934592",
         "Speed": 3200,
         "ConfiguredClockSpeed": 3200,
@@ -409,9 +406,6 @@ def test_read_dram_summary_windows_parses_safe_cim_json(monkeypatch) -> None:
         "SMBIOSMemoryType": 26
       },
       {
-        "Manufacturer": "Samsung",
-        "PartNumber": "M323R2GA3PB0-CWMOL",
-        "SerialNumber": "48A201E5",
         "Capacity": "8589934592",
         "Speed": 3200,
         "ConfiguredClockSpeed": 3200,
@@ -433,9 +427,9 @@ def test_read_dram_summary_windows_parses_safe_cim_json(monkeypatch) -> None:
     summary = _read_dram_summary_windows()
 
     powershell_command = commands[0][-1]
-    assert "Manufacturer" in powershell_command
-    assert "PartNumber" in powershell_command
-    assert "SerialNumber" in powershell_command
+    assert "Manufacturer" not in powershell_command
+    assert "PartNumber" not in powershell_command
+    assert "SerialNumber" not in powershell_command
     assert summary == {
         "module_count": 2,
         "modules": [
@@ -583,6 +577,21 @@ def test_summarize_motherboard_pcie_ignores_invalid_sentinel_lane_width() -> Non
         "max_link_generation": "Gen5",
         "max_lane_width": "x16",
     }
+
+
+def test_extract_chipset_continues_after_unlabeled_bridge() -> None:
+    chipset = static_info._extract_chipset_from_pcie_devices(
+        [
+            {"class": "0x060400"},
+            {
+                "class": "0x0c0500",
+                "manufacturer": "Intel Corporation",
+                "name": "SMBus Controller",
+            },
+        ]
+    )
+
+    assert chipset == "Intel Corporation SMBus Controller"
 
 
 def test_parse_linux_dmidecode_memory_omits_sensitive_fields_from_summary() -> None:

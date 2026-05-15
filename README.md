@@ -651,7 +651,7 @@ Uses **pyRAPL** for power measurements and **psutil** for utilization/memory.
 
 - **Features**: Tracks total system CPU usage or specific indices (e.g., `CPUDeviceTracker(cpu_id=[0, 1])`).
 - **Temperature**: Uses `psutil.sensors_temperatures()` when the platform exposes CPU thermal sensors.
-- **Static Info**: Reports CPU architecture, model, vendor, physical/logical cores, optional base/boost/max clock metadata, DRAM capacity/type/speed, motherboard metadata, OS details, and CPU power policy when available.
+- **Static Info**: Reports CPU architecture, model, vendor, optional base/boost/max clock metadata, DRAM capacity/type/speed, motherboard metadata, OS details, and CPU power policy when available.
 
 ### NVIDIA GPU
 
@@ -758,7 +758,7 @@ Static information is collected on a best-effort, privacy-first basis and may va
 
 Typical fields include:
 
-- `hardware.cpu`: CPU architecture, model name, vendor, physical cores, logical cores, plus optional `base_clock_mhz`, `boost_clock_mhz`, and `max_clock_mhz` when the platform exposes them
+- `hardware.cpu`: CPU architecture, model name, vendor, plus optional `base_clock_mhz`, `boost_clock_mhz`, and `max_clock_mhz` when the platform exposes them
 - `hardware.dram`: total and available memory in bytes plus `total_mb`, `total_gb`, `available_mb`, and `available_gb`; optional privacy-safe aggregate fields include `ram_type`, `speed_mhz`, `configured_speed_mhz`, `module_count`, `modules`, and `theoretical_bandwidth_gbps` when available. Per-module entries may include `capacity_bytes`, `capacity_mb`, `capacity_gb`, DDR type, speed, width, and estimated bandwidth. Individual DIMM serial numbers, part numbers, and PCIe/device instance identifiers are not exposed.
 - `hardware.motherboard`: optional baseboard `manufacturer`, `model_name`, `version`, best-effort `chipset`, and `pcie` support/capability summary. Motherboard serial numbers, asset tags, PCI bus addresses, and Windows instance IDs are not exposed.
 - `hardware.motherboard.pcie`: optional maximum PCIe generation/speed/lane-width summary and privacy-safe slot metadata such as designation, type, usage, length, generation, and lane width.

@@ -626,8 +626,8 @@ def _read_dram_summary_windows() -> dict[str, object]:
             "Bypass",
             "-Command",
             "Get-CimInstance Win32_PhysicalMemory | "
-            "Select-Object Manufacturer,PartNumber,SerialNumber,Capacity,Speed,"
-            "ConfiguredClockSpeed,DataWidth,TotalWidth,SMBIOSMemoryType | "
+            "Select-Object Capacity,Speed,ConfiguredClockSpeed,DataWidth,"
+            "TotalWidth,SMBIOSMemoryType | "
             "ConvertTo-Json -Depth 3",
         ]
     )
@@ -649,9 +649,6 @@ def _read_dram_summary_windows() -> dict[str, object]:
     modules = []
     for entry in entries:
         module = {
-            "manufacturer": _clean_dram_string(entry.get("Manufacturer")),
-            "part_number": _clean_dram_string(entry.get("PartNumber")),
-            "serial_number": _clean_dram_string(entry.get("SerialNumber")),
             "capacity_bytes": _to_int(entry.get("Capacity")),
             "speed_mhz": _to_int(entry.get("Speed")),
             "configured_speed_mhz": _to_int(entry.get("ConfiguredClockSpeed")),
@@ -1363,7 +1360,9 @@ def _extract_chipset_from_pcie_devices(
         ).strip()
         lowered = text.lower()
         if class_code.startswith(preferred_classes) or any(k in lowered for k in keywords):
-            return _clean_hardware_string(text)
+            chipset = _clean_hardware_string(text)
+            if chipset is not None:
+                return chipset
     return None
 
 
