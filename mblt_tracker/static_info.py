@@ -1248,6 +1248,8 @@ def _read_motherboard_summary_linux(
         sudo_password_provider=sudo_password_provider,
     )
     motherboard = _parse_linux_dmidecode_baseboard(output or "")
+    if not motherboard:
+        motherboard = _read_linux_dmi_baseboard_sysfs()
     devices = pcie_devices or []
     chipset = _extract_chipset_from_pcie_devices(devices)
     if chipset is not None:
@@ -1298,6 +1300,34 @@ def _parse_linux_dmidecode_baseboard(output: str) -> dict[str, object]:
             "version": _clean_hardware_string(fields.get("Version")),
         }
         return {key: value for key, value in values.items() if value is not None}
+    return {}
+
+
+def _read_linux_dmi_baseboard_sysfs() -> dict[str, object]:
+    """Read privacy-safe Linux baseboard metadata from DMI sysfs.
+
+    ``dmidecode`` usually needs elevated privileges, while the board vendor,
+    name, and version sysfs attributes are commonly readable by unprivileged
+    users. Serial numbers and asset tags are intentionally not read.
+    """
+    override = os.environ.get("MBLT_TRACKER_DMI_SYSFS")
+    dmi_roots = [Path(override)] if override is not None else [
+        Path("/sys/class/dmi/id"),
+        Path("/sys/devices/virtual/dmi/id"),
+    ]
+    key_paths = {
+        "manufacturer": "board_vendor",
+        "model_name": "board_name",
+        "version": "board_version",
+    }
+    for dmi_root in dmi_roots:
+        values = {
+            key: _clean_hardware_string(_read_first_line(dmi_root / filename))
+            for key, filename in key_paths.items()
+        }
+        cleaned = {key: value for key, value in values.items() if value is not None}
+        if cleaned:
+            return cleaned
     return {}
 
 
@@ -1361,11 +1391,17 @@ def _format_max_lane_width(value: object) -> str | None:
         return None
     match = re.search(r"x\s*([0-9]+)", str(value), re.IGNORECASE)
     if match is not None:
-        return f"x{int(match.group(1))}"
+        width = int(match.group(1))
+        return f"x{width}" if _is_valid_pcie_lane_width(width) else None
     width = _to_int(value)
-    if width is not None and width > 0:
+    if width is not None and _is_valid_pcie_lane_width(width):
         return f"x{width}"
     return None
+
+
+def _is_valid_pcie_lane_width(width: int) -> bool:
+    """Return true for real PCIe lane widths, excluding sentinel values."""
+    return width in {1, 2, 4, 8, 12, 16, 32}
 
 
 def _max_lane_width(values: Sequence[object]) -> str | None:

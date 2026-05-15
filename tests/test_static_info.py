@@ -531,6 +531,60 @@ def test_get_host_static_info_linux_handles_unavailable_dmidecode_without_passwo
     assert ["sudo", "-n", "dmidecode", "-t", "memory"] in commands
 
 
+def test_read_motherboard_summary_linux_falls_back_to_dmi_sysfs(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    dmi_root = tmp_path / "dmi"
+    dmi_root.mkdir()
+    _write(dmi_root / "board_vendor", "Micro-Star International Co., Ltd.\n")
+    _write(dmi_root / "board_name", "MAG B760 TOMAHAWK WIFI (MS-7D96)\n")
+    _write(dmi_root / "board_version", "2.0\n")
+
+    monkeypatch.setenv("MBLT_TRACKER_DMI_SYSFS", str(dmi_root))
+    monkeypatch.setattr(static_info, "_read_dmidecode_output", lambda *_, **__: None)
+
+    motherboard = static_info._read_motherboard_summary_linux()
+
+    assert motherboard == {
+        "manufacturer": "Micro-Star International Co., Ltd.",
+        "model_name": "MAG B760 TOMAHAWK WIFI (MS-7D96)",
+        "version": "2.0",
+    }
+
+
+def test_read_motherboard_summary_linux_omits_placeholder_dmi_values(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    dmi_root = tmp_path / "dmi"
+    dmi_root.mkdir()
+    _write(dmi_root / "board_vendor", "To Be Filled By O.E.M.\n")
+    _write(dmi_root / "board_name", "Default String\n")
+    _write(dmi_root / "board_version", "Not Specified\n")
+
+    monkeypatch.setenv("MBLT_TRACKER_DMI_SYSFS", str(dmi_root))
+    monkeypatch.setattr(static_info, "_read_dmidecode_output", lambda *_, **__: None)
+
+    assert static_info._read_motherboard_summary_linux() == {}
+
+
+def test_summarize_motherboard_pcie_ignores_invalid_sentinel_lane_width() -> None:
+    pcie = static_info._summarize_motherboard_pcie(
+        [
+            {"max_link_speed": "32.0 GT/s PCIe", "max_link_width": "255"},
+            {"max_link_speed": "16.0 GT/s PCIe", "max_link_width": "16"},
+            {"max_link_speed": "8.0 GT/s PCIe", "max_link_width": "8"},
+        ]
+    )
+
+    assert pcie == {
+        "max_link_speed": "32.0 GT/s PCIe",
+        "max_link_generation": "Gen5",
+        "max_lane_width": "x16",
+    }
+
+
 def test_parse_linux_dmidecode_memory_omits_sensitive_fields_from_summary() -> None:
     output = """
 Handle 0x0038, DMI type 17, 92 bytes

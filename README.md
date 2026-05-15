@@ -450,24 +450,27 @@ Warning: NVML not available. GPU information will not be collected.
   "hardware": {
     "cpu": {
       "architecture": "x86_64",
-      "model_name": "11th Gen Intel(R) Core(TM) i7-11700K @ 3.60GHz",
+      "model_name": "13th Gen Intel(R) Core(TM) i5-13600K",
       "vendor": "GenuineIntel"
     },
     "dram": {
-      "available_bytes": 40428683264,
-      "available_gb": 37.65,
-      "available_mb": 38555.8,
-      "total_bytes": 67178881024,
-      "total_gb": 62.57,
-      "total_mb": 64066.77
+      "available_bytes": 27675623424,
+      "available_gb": 25.77,
+      "available_mb": 26393.53,
+      "total_bytes": 33379606528,
+      "total_gb": 31.09,
+      "total_mb": 31833.27
     },
     "motherboard": {
       "chipset": "Intel Corporation Device",
+      "manufacturer": "ASUSTeK COMPUTER INC.",
+      "model_name": "ROG STRIX B760-I GAMING WIFI",
       "pcie": {
-        "max_lane_width": "x255",
+        "max_lane_width": "x16",
         "max_link_generation": "Gen5",
         "max_link_speed": "32.0 GT/s PCIe"
-      }
+      },
+      "version": "Rev 1.xx"
     },
     "npus": [
       {
@@ -485,13 +488,13 @@ Warning: NVML not available. GPU information will not be collected.
         },
         "lane_width": "8",
         "link_generation": "4",
-        "manufacturer": "Mobilint, Inc.",
+        "manufacturer": "MOBILINT, Inc.",
         "max_lane_width": "x8",
         "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
-        "name": "Aries",
+        "name": "MOBILINT NPU Accelerator",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -513,13 +516,13 @@ Warning: NVML not available. GPU information will not be collected.
         },
         "lane_width": "8",
         "link_generation": "4",
-        "manufacturer": "Mobilint, Inc.",
+        "manufacturer": "MOBILINT, Inc.",
         "max_lane_width": "x8",
         "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
-        "name": "Aries",
+        "name": "MOBILINT NPU Accelerator",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -541,13 +544,13 @@ Warning: NVML not available. GPU information will not be collected.
         },
         "lane_width": "8",
         "link_generation": "4",
-        "manufacturer": "Mobilint, Inc.",
+        "manufacturer": "MOBILINT, Inc.",
         "max_lane_width": "x8",
         "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
-        "name": "Aries",
+        "name": "MOBILINT NPU Accelerator",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -569,13 +572,13 @@ Warning: NVML not available. GPU information will not be collected.
         },
         "lane_width": "8",
         "link_generation": "4",
-        "manufacturer": "Mobilint, Inc.",
+        "manufacturer": "MOBILINT, Inc.",
         "max_lane_width": "x8",
         "max_link_generation": "Gen4",
         "max_link_speed": "16.0 GT/s PCIe",
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
-        "name": "Aries",
+        "name": "MOBILINT NPU Accelerator",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -586,7 +589,7 @@ Warning: NVML not available. GPU information will not be collected.
   },
   "inference": {
     "cpu": {
-      "governor": "performance",
+      "governor": "powersave",
       "max_processor_state_pct": null,
       "min_processor_state_pct": null,
       "power_plan": null
@@ -595,14 +598,14 @@ Warning: NVML not available. GPU information will not be collected.
       "version": "12.8"
     },
     "driver": {
-      "aries_version": "1.12.1",
+      "aries_version": "1.12.0",
       "regulus_version": "N/A"
     },
-    "npu_driver_version": "1.12.1",
+    "npu_driver_version": "1.12.0",
     "os": {
-      "kernel_version": "6.17.0-20-generic",
+      "kernel_version": "6.17.0-23-generic",
       "name": "Linux",
-      "version": "Ubuntu 24.04.2 LTS"
+      "version": "Ubuntu 24.04.4 LTS"
     },
     "qbcompiler": {
       "version": "not_installed"
