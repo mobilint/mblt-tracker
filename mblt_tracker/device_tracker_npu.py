@@ -35,6 +35,9 @@ _MLA100_SUBSYSTEM_VENDOR_ID = "0x401"
 _MLA100_SUBSYSTEM_DEVICE_ID = "0x1093"
 _LOGGER = logging.getLogger(__name__)
 _MOBILINT_CLI_VERSION_CHECKED = False
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))"
+)
 
 _MetricTuple = tuple[
     float,
@@ -593,7 +596,7 @@ def _parse_mobilint_status_table_metric_samples(
 ) -> Optional[list[_MetricSample]]:
     """Parse mobilint-cli v1.2.0 ``status`` table output into card samples."""
     chip_samples: list[_MetricSample] = []
-    lines = status_output.splitlines()
+    lines = _strip_ansi_sequences(status_output).splitlines()
     first_row_re = re.compile(
         r"^\|\s*(?P<dev_no>\d+)\s+[^|]*\((?P<board_name>[^)]+)\)\s*"
         r"\|\s*(?P<npu_power>[-+]?\d+(?:\.\d+)?)W\s+"
@@ -1151,7 +1154,12 @@ def _run_status_command(command: list[str]) -> Optional[str]:
 
     if result.returncode != 0 or not result.stdout:
         return None
-    return result.stdout.strip()
+    return _strip_ansi_sequences(result.stdout).strip()
+
+
+def _strip_ansi_sequences(value: str) -> str:
+    """Remove terminal ANSI escape sequences from mobilint-cli output."""
+    return _ANSI_ESCAPE_RE.sub("", value)
 
 
 def _legacy_status_json_command() -> list[str]:

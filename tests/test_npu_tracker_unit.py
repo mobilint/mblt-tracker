@@ -57,6 +57,24 @@ MLA400_STATUS_OUTPUT = """2026-05-19 13:04:07
 +------------------------------------------------------------------------------------------+
 """
 
+COLORED_MLA400_STATUS_OUTPUT = (
+    "\x1b[36m" + MLA400_STATUS_OUTPUT + "\x1b[0m"
+).replace("|", "\x1b[32m|\x1b[0m").replace(
+    "23.11W", "\x1b[33m23.11W\x1b[0m"
+).replace(
+    "0.59W", "\x1b[33m0.59W\x1b[0m"
+).replace(
+    "0.66W", "\x1b[33m0.66W\x1b[0m"
+).replace(
+    "36 C", "\x1b[31m36 C\x1b[0m"
+).replace(
+    "37 C", "\x1b[31m37 C\x1b[0m"
+).replace(
+    "38 C", "\x1b[31m38 C\x1b[0m"
+).replace(
+    "0.00%", "\x1b[35m0.00%\x1b[0m"
+)
+
 STATUS_QUERY_OUTPUT = """Timestamp                     : 2026-05-07 04:10:46
 Driver Version (Aries)        : 1.12.0 (Rev: 1)
 Driver Version (Regulus)      : N/A
@@ -358,6 +376,20 @@ def test_parse_mobilint_status_table_metric_samples_groups_mla400() -> None:
     assert sample["npu_power_w"] == pytest.approx(0.59 + 0.59 + 0.66 + 0.59)
     assert sample["npu_mem_used_mb"] == pytest.approx(0.0)
     assert sample["npu_mem_total_mb"] == pytest.approx(4 * 16384.0)
+    assert sample["npu_temp_c"] == pytest.approx((36.0 + 37.0 + 38.0 + 38.0) / 4)
+
+
+def test_parse_mobilint_status_table_metric_samples_strips_ansi_for_mla400() -> None:
+    samples = _parse_mobilint_status_table_metric_samples(COLORED_MLA400_STATUS_OUTPUT)
+
+    assert samples is not None
+    assert len(samples) == 1
+    sample = samples[0]
+    assert sample["card_model"] == "MLA400"
+    assert sample["card_id"] == 0
+    assert sample["chip_count"] == 4
+    assert sample["total_power_w"] == pytest.approx(23.11)
+    assert sample["npu_power_w"] == pytest.approx(0.59 + 0.59 + 0.66 + 0.59)
     assert sample["npu_temp_c"] == pytest.approx((36.0 + 37.0 + 38.0 + 38.0) / 4)
 
 
