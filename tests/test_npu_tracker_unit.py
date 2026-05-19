@@ -11,6 +11,7 @@ from mblt_tracker.device_tracker_npu import (
     _parse_mobilint_status_query_metric_samples,
     _parse_mobilint_status_query_metrics,
     _parse_mobilint_status_static_info,
+    _parse_mobilint_status_table_metric_samples,
 )
 from mblt_tracker.static_info import parse_mobilint_status_query_output
 
@@ -24,6 +25,36 @@ STATUS_OUTPUT = """2026-04-15 16:06:59
 |   0  Aries(aries0)            |   2.11W   7.87W |   50MHz /  150MHz |      0MB / 16384MB |
 |   0  49 C               1.2.4 |   0.17A   0.65A |                   |              0.00% |
 +-------------------------------+-----------------+-------------------+--------------------+
+"""
+
+MLA400_STATUS_OUTPUT = """2026-05-19 13:04:07
++------------------------------------------------------------------------------------------+
+| Mobilint-NPU-Monitor                           Drivers - Aries: 1.12.0  Regulus: N/A     |
++------------------------------------------------------------------------------------------+
+| NPU  Name                     |   Pwr:NPU/Total |     Clock:NPU/Bus |       Memory-Usage |
+| Sig  Temp    Firmware Version |   Cur:NPU/Total |                   |           NPU-Util |
+|===============================+=================+===================+====================|
+|   0  Aries(aries0)            |   0.59W  23.11W |   50MHz /  150MHz |      0MB / 16384MB |
+|   0  36 C               1.2.5 |   0.90A   1.94A |                   |              0.00% |
++-------------------------------+-----------------+-------------------+--------------------+
+|   1  Aries(aries1)            |   0.59W   0.00W |   50MHz /  150MHz |      0MB / 16384MB |
+|   0  37 C               1.2.5 |   0.90A   0.00A |                   |              0.00% |
++-------------------------------+-----------------+-------------------+--------------------+
+|   2  Aries(aries2)            |   0.66W   0.00W |   50MHz /  150MHz |      0MB / 16384MB |
+|   0  38 C               1.2.5 |   1.00A   0.00A |                   |              0.00% |
++-------------------------------+-----------------+-------------------+--------------------+
+|   3  Aries(aries3)            |   0.59W   0.00W |   50MHz /  150MHz |      0MB / 16384MB |
+|   0  38 C               1.2.5 |   0.90A   0.00A |                   |              0.00% |
++-------------------------------+-----------------+-------------------+--------------------+
+
++------------------------------------------------------------------------------------------+
+| Processes:                                                                               |
+| NPU      PID   Process name                               NPU-MEM       Count       %NPU |
+|==========================================================================================|
+|------------------------------------------------------------------------------------------|
+|------------------------------------------------------------------------------------------|
+|------------------------------------------------------------------------------------------|
++------------------------------------------------------------------------------------------+
 """
 
 STATUS_QUERY_OUTPUT = """Timestamp                     : 2026-05-07 04:10:46
@@ -299,6 +330,107 @@ def test_parse_mobilint_status_static_info() -> None:
     }
 
 
+def test_parse_mobilint_status_table_metric_samples_classifies_mla100() -> None:
+    samples = _parse_mobilint_status_table_metric_samples(STATUS_OUTPUT)
+
+    assert samples is not None
+    assert len(samples) == 1
+    sample = samples[0]
+    assert sample["card_model"] == "MLA100"
+    assert sample["card_id"] == 0
+    assert sample["dev_no"] == 0
+    assert sample["total_power_w"] == pytest.approx(7.87)
+    assert sample["npu_power_w"] == pytest.approx(2.11)
+    assert sample["npu_mem_total_mb"] == pytest.approx(16384.0)
+    assert sample["npu_temp_c"] == pytest.approx(49.0)
+
+
+def test_parse_mobilint_status_table_metric_samples_groups_mla400() -> None:
+    samples = _parse_mobilint_status_table_metric_samples(MLA400_STATUS_OUTPUT)
+
+    assert samples is not None
+    assert len(samples) == 1
+    sample = samples[0]
+    assert sample["card_model"] == "MLA400"
+    assert sample["card_id"] == 0
+    assert sample["chip_count"] == 4
+    assert sample["total_power_w"] == pytest.approx(23.11)
+    assert sample["npu_power_w"] == pytest.approx(0.59 + 0.59 + 0.66 + 0.59)
+    assert sample["npu_mem_used_mb"] == pytest.approx(0.0)
+    assert sample["npu_mem_total_mb"] == pytest.approx(4 * 16384.0)
+    assert sample["npu_temp_c"] == pytest.approx((36.0 + 37.0 + 38.0 + 38.0) / 4)
+
+
+def test_npu_default_sampling_uses_status_table_output(monkeypatch) -> None:
+    tracker = _make_tracker()
+    tracker._status_cmd = "mobilint-cli status"
+    tracker._npu_id = None
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = MLA400_STATUS_OUTPUT
+
+    def fake_run(command, *args, **kwargs):
+        calls.append(command)
+        return Result()
+
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.subprocess.run", fake_run)
+
+    samples = tracker._fetch_metric_samples()
+
+    assert calls == [["mobilint-cli", "status"]]
+    assert samples is not None
+    assert len(samples) == 1
+    assert samples[0]["card_model"] == "MLA400"
+    assert samples[0]["total_power_w"] == pytest.approx(23.11)
+
+
+def test_npu_init_warns_when_mobilint_cli_is_missing(monkeypatch, caplog) -> None:
+    import mblt_tracker.device_tracker_npu as npu_module
+
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.platform.system", lambda: "Linux")
+    monkeypatch.setattr(npu_module, "_MOBILINT_CLI_VERSION_CHECKED", False)
+
+    def fake_run(command, *args, **kwargs):
+        raise FileNotFoundError("mobilint-cli")
+
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.subprocess.run", fake_run)
+
+    with caplog.at_level("WARNING"):
+        NPUDeviceTracker()
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("mobilint-cli is not installed" in message for message in messages)
+    assert any("installing_utility.html#install-mobilint-cli" in message for message in messages)
+
+
+def test_npu_init_warns_when_mobilint_cli_version_is_not_1_2_0(
+    monkeypatch,
+    caplog,
+) -> None:
+    import mblt_tracker.device_tracker_npu as npu_module
+
+    monkeypatch.setattr("mblt_tracker.device_tracker_npu.platform.system", lambda: "Linux")
+    monkeypatch.setattr(npu_module, "_MOBILINT_CLI_VERSION_CHECKED", False)
+
+    class Result:
+        returncode = 0
+        stdout = "mobilint-cli version 1.1.0"
+
+    monkeypatch.setattr(
+        "mblt_tracker.device_tracker_npu.subprocess.run",
+        lambda *args, **kwargs: Result(),
+    )
+
+    with caplog.at_level("WARNING"):
+        NPUDeviceTracker()
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("targets mobilint-cli 1.2.0" in message for message in messages)
+    assert any("installing_utility.html#install-mobilint-cli" in message for message in messages)
+
+
 def test_parse_mobilint_status_query_output_to_nested_dict() -> None:
     parsed = parse_mobilint_status_query_output(STATUS_QUERY_OUTPUT)
 
@@ -562,9 +694,9 @@ def test_npu_fetch_metrics_reads_legacy_json_ddr_and_pmic_power(monkeypatch) -> 
     )
 
 
-def test_npu_fetch_metrics_falls_back_when_status_query_fails(monkeypatch) -> None:
+def test_npu_fetch_metrics_falls_back_when_default_status_fails(monkeypatch) -> None:
     tracker = _make_tracker()
-    tracker._status_cmd = "mobilint-cli status -q"
+    tracker._status_cmd = "mobilint-cli status"
     calls = []
 
     class Result:
@@ -574,7 +706,7 @@ def test_npu_fetch_metrics_falls_back_when_status_query_fails(monkeypatch) -> No
 
     def fake_run(command, *args, **kwargs):
         calls.append(command)
-        if command == ["mobilint-cli", "status", "-q"]:
+        if command == ["mobilint-cli", "status"]:
             return Result(returncode=2, stdout="")
         assert command[-2:] == ["--sample-once", "--json"]
         return Result(
@@ -605,13 +737,13 @@ def test_npu_fetch_metrics_falls_back_when_status_query_fails(monkeypatch) -> No
         0.0,
         49.0,
     )
-    assert calls[0] == ["mobilint-cli", "status", "-q"]
+    assert calls[0] == ["mobilint-cli", "status"]
     assert calls[1][-2:] == ["--sample-once", "--json"]
 
 
 def test_npu_json_fallback_honors_selected_npu_id(monkeypatch) -> None:
     tracker = _make_tracker()
-    tracker._status_cmd = "mobilint-cli status -q"
+    tracker._status_cmd = "mobilint-cli status"
     tracker._npu_id = [1]
 
     class Result:
@@ -620,7 +752,7 @@ def test_npu_json_fallback_honors_selected_npu_id(monkeypatch) -> None:
             self.stdout = stdout
 
     def fake_run(command, *args, **kwargs):
-        if command == ["mobilint-cli", "status", "-q"]:
+        if command == ["mobilint-cli", "status"]:
             return Result(returncode=2, stdout="")
         assert command[-2:] == ["--sample-once", "--json"]
         return Result(
@@ -650,11 +782,11 @@ def test_npu_json_fallback_honors_selected_npu_id(monkeypatch) -> None:
     assert metrics["npu"] == {}
 
 
-def test_npu_fetch_metrics_falls_back_when_status_query_unparsable(
+def test_npu_fetch_metrics_falls_back_when_default_status_unparsable(
     monkeypatch,
 ) -> None:
     tracker = _make_tracker()
-    tracker._status_cmd = "mobilint-cli status -q"
+    tracker._status_cmd = "mobilint-cli status"
 
     class Result:
         def __init__(self, returncode: int, stdout: str):
@@ -662,7 +794,7 @@ def test_npu_fetch_metrics_falls_back_when_status_query_unparsable(
             self.stdout = stdout
 
     def fake_run(command, *args, **kwargs):
-        if command == ["mobilint-cli", "status", "-q"]:
+        if command == ["mobilint-cli", "status"]:
             return Result(returncode=0, stdout="not a supported status output")
         return Result(
             returncode=0,
