@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import platform
 import re
@@ -23,11 +24,20 @@ from .static_info import (
     run_command,
 )
 
-_DEFAULT_STATUS_CMD = "mobilint-cli status -q"
+_DEFAULT_STATUS_CMD = "mobilint-cli status"
+_EXPECTED_MOBILINT_CLI_VERSION = "1.2.0"
+_MOBILINT_CLI_INSTALL_URL = (
+    "https://docs.mobilint.com/v1.2/en/installing_utility.html#install-mobilint-cli"
+)
 _MLA400_SUBSYSTEM_VENDOR_ID = "0x402"
 _MLA400_SUBSYSTEM_DEVICE_ID = "0x108b"
 _MLA100_SUBSYSTEM_VENDOR_ID = "0x401"
 _MLA100_SUBSYSTEM_DEVICE_ID = "0x1093"
+_LOGGER = logging.getLogger(__name__)
+_MOBILINT_CLI_VERSION_CHECKED = False
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))"
+)
 
 _MetricTuple = tuple[
     float,
@@ -57,11 +67,10 @@ class NPUDeviceTracker(BaseDeviceTracker):
         Args:
             interval (float): The interval in seconds at which the NPU should be polled.
             status_cmd (Optional[str]): Custom command to fetch NPU status.
-                Defaults to `mobilint-cli status -q`.
+                Defaults to `mobilint-cli status`.
             npu_id (Union[int, list[int], None]): Logical NPU card indices to track.
                 If None, all detected logical cards are tracked. MLA400 boards are
-                grouped as one logical card when `mobilint-cli status -q` exposes
-                the GOLDFINGER power rail.
+                grouped as one logical card from the v1.2.0 status table layout.
 
         Raises:
             RuntimeError: If the operating system is not Linux.
@@ -70,6 +79,8 @@ class NPUDeviceTracker(BaseDeviceTracker):
         if platform.system() != "Linux":
             raise RuntimeError("NPUDeviceTracker currently supports Linux only")
         self._status_cmd = status_cmd if status_cmd is not None else _DEFAULT_STATUS_CMD
+        if self._status_cmd == _DEFAULT_STATUS_CMD:
+            _warn_if_unsupported_mobilint_cli_version()
         if isinstance(npu_id, int):
             if npu_id < 0:
                 raise ValueError(f"Invalid NPU ID: {npu_id}")
@@ -110,9 +121,9 @@ class NPUDeviceTracker(BaseDeviceTracker):
     ]:
         """Execute the status command and parse NPU metric output.
 
-        The default path uses ``mobilint-cli status -q`` and parses the
-        indentation-based query format directly. For backward compatibility,
-        custom commands that return the legacy JSON payload are still accepted.
+        The default path uses ``mobilint-cli status`` and parses the v1.2.0
+        table format directly. For backward compatibility, query-format and
+        legacy JSON payloads are still accepted.
 
         Returns:
             Optional[tuple]: A tuple containing (npu_power_w, total_power_w,
@@ -136,9 +147,9 @@ class NPUDeviceTracker(BaseDeviceTracker):
     def _fetch_metric_samples(self) -> Optional[list[_MetricSample]]:
         """Fetch logical NPU card samples.
 
-        `mobilint-cli status -q` samples are grouped into logical cards. MLA400
-        is detected by the GOLDFINGER power rail and represented as one card;
-        MLA100 devices remain one card per device.
+        `mobilint-cli status` table samples are grouped into logical cards.
+        MLA400 boards are represented as one card; MLA100 devices remain one
+        card per device. Query-format and JSON outputs are accepted as fallback.
         """
         has_fetch_metrics_override = (
             "_fetch_metrics" in self.__dict__
@@ -157,7 +168,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
 
         output = _run_status_command(shlex.split(self._status_cmd))
         samples = (
-            _parse_mobilint_status_query_metric_samples(output)
+            _parse_mobilint_status_metric_samples(output)
             if output is not None
             else None
         )
@@ -511,6 +522,179 @@ class NPUDeviceTracker(BaseDeviceTracker):
 def _parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
     """Parse static NPU fields from ``mobilint-cli status`` table output."""
     return parse_mobilint_status_static_info(status_output)
+
+
+def _warn_if_unsupported_mobilint_cli_version() -> None:
+    """Warn once when mobilint-cli is missing or not the parser target version."""
+    global _MOBILINT_CLI_VERSION_CHECKED
+    if _MOBILINT_CLI_VERSION_CHECKED:
+        return
+    _MOBILINT_CLI_VERSION_CHECKED = True
+
+    version_output = _run_status_command(["mobilint-cli", "--version"])
+    if version_output is None:
+        _LOGGER.warning(
+            "mobilint-cli is not installed or not executable. NPU tracking requires "
+            "mobilint-cli %s status output parsing. Install/upgrade guide: %s",
+            _EXPECTED_MOBILINT_CLI_VERSION,
+            _MOBILINT_CLI_INSTALL_URL,
+        )
+        return
+
+    version = _parse_mobilint_cli_version(version_output)
+    if version != _EXPECTED_MOBILINT_CLI_VERSION:
+        _LOGGER.warning(
+            "mblt-tracker NPU status parser targets mobilint-cli %s, but detected "
+            "version output was %r. Parsed NPU metrics may be incorrect. "
+            "Install/upgrade guide: %s",
+            _EXPECTED_MOBILINT_CLI_VERSION,
+            version_output,
+            _MOBILINT_CLI_INSTALL_URL,
+        )
+
+
+def _parse_mobilint_cli_version(version_output: str) -> Optional[str]:
+    match = re.search(r"\b(\d+\.\d+\.\d+)\b", version_output)
+    return match.group(1) if match is not None else None
+
+
+def _parse_mobilint_status_table_metrics(
+    status_output: str,
+) -> Optional[_MetricTuple]:
+    samples = _parse_mobilint_status_table_metric_samples(status_output)
+    if not samples:
+        return None
+    first_sample = samples[0]
+    npu_power_w = _sample_float(first_sample, "npu_power_w")
+    total_power_w = _sample_float(first_sample, "total_power_w")
+    if npu_power_w is None or total_power_w is None:
+        return None
+    return (
+        npu_power_w,
+        total_power_w,
+        _sample_float(first_sample, "ddr_power_w"),
+        _sample_float(first_sample, "pmic_power_w"),
+        _sample_float(first_sample, "npu_util_pct"),
+        _sample_float(first_sample, "npu_mem_used_mb"),
+        _sample_float(first_sample, "npu_mem_total_mb"),
+        _sample_float(first_sample, "npu_mem_used_pct"),
+        _sample_float(first_sample, "npu_temp_c"),
+    )
+
+
+def _parse_mobilint_status_metric_samples(
+    status_output: str,
+) -> Optional[list[_MetricSample]]:
+    samples = _parse_mobilint_status_table_metric_samples(status_output)
+    if samples:
+        return samples
+    return _parse_mobilint_status_query_metric_samples(status_output)
+
+
+def _parse_mobilint_status_table_metric_samples(
+    status_output: str,
+) -> Optional[list[_MetricSample]]:
+    """Parse mobilint-cli v1.2.0 ``status`` table output into card samples."""
+    chip_samples: list[_MetricSample] = []
+    lines = _strip_ansi_sequences(status_output).splitlines()
+    first_row_re = re.compile(
+        r"^\|\s*(?P<dev_no>\d+)\s+[^|]*\((?P<board_name>[^)]+)\)\s*"
+        r"\|\s*(?P<npu_power>[-+]?\d+(?:\.\d+)?)W\s+"
+        r"(?P<total_power>[-+]?\d+(?:\.\d+)?)W\s*\|[^|]*\|\s*"
+        r"(?P<mem_used>[-+]?\d+(?:\.\d+)?)MB\s*/\s*"
+        r"(?P<mem_total>[-+]?\d+(?:\.\d+)?)MB\s*\|"
+    )
+    second_row_re = re.compile(
+        r"^\|\s*(?P<sig>\d+)\s+(?P<temp>[-+]?\d+(?:\.\d+)?)\s+C\s+"
+        r"(?P<firmware>\S+)\s*\|\s*(?P<npu_current>[-+]?\d+(?:\.\d+)?)A\s+"
+        r"(?P<total_current>[-+]?\d+(?:\.\d+)?)A\s*\|[^|]*\|\s*"
+        r"(?P<util>[-+]?\d+(?:\.\d+)?)%\s*\|"
+    )
+
+    index = 0
+    while index < len(lines) - 1:
+        first_match = first_row_re.match(lines[index])
+        if first_match is None:
+            index += 1
+            continue
+        second_match = second_row_re.match(lines[index + 1])
+        if second_match is None:
+            index += 1
+            continue
+
+        mem_used_mb = float(first_match.group("mem_used"))
+        mem_total_mb = float(first_match.group("mem_total"))
+        chip_samples.append(
+            {
+                "card_id": int(first_match.group("dev_no")),
+                "dev_no": int(first_match.group("dev_no")),
+                "board_name": first_match.group("board_name"),
+                "card_model": "MLA100",
+                "npu_power_w": float(first_match.group("npu_power")),
+                "total_power_w": float(first_match.group("total_power")),
+                "ddr_power_w": None,
+                "pmic_power_w": None,
+                "goldfinger_power_w": None,
+                "npu_util_pct": float(second_match.group("util")),
+                "npu_mem_used_mb": mem_used_mb,
+                "npu_mem_total_mb": mem_total_mb,
+                "npu_mem_used_pct": (mem_used_mb / mem_total_mb) * 100.0
+                if mem_total_mb != 0.0
+                else None,
+                "npu_temp_c": float(second_match.group("temp")),
+                "npu_current_a": float(second_match.group("npu_current")),
+                "total_current_a": float(second_match.group("total_current")),
+                "firmware_version": second_match.group("firmware"),
+            }
+        )
+        index += 2
+
+    if not chip_samples:
+        return None
+    return _group_table_metric_samples(chip_samples)
+
+
+def _group_table_metric_samples(samples: list[_MetricSample]) -> list[_MetricSample]:
+    grouped_samples: list[_MetricSample] = []
+    samples = sorted(samples, key=_sample_sort_key)
+    index = 0
+    while index < len(samples):
+        sample = samples[index]
+        dev_no = _sample_int(sample, "dev_no")
+        if dev_no is not None:
+            candidate = samples[index : index + 4]
+            if _is_mla400_table_group(candidate):
+                card_id = _mla400_group_id(sample, len(grouped_samples))
+                grouped_samples.append(_aggregate_mla400_samples(candidate, card_id))
+                index += 4
+                continue
+        grouped_samples.append(sample)
+        index += 1
+    grouped_samples.sort(key=_sample_sort_key)
+    return grouped_samples
+
+
+def _is_mla400_table_group(samples: list[_MetricSample]) -> bool:
+    if len(samples) != 4:
+        return False
+    dev_nos = [_sample_int(sample, "dev_no") for sample in samples]
+    if any(dev_no is None for dev_no in dev_nos):
+        return False
+    first_dev_no = dev_nos[0]
+    if first_dev_no is None or first_dev_no % 4 != 0:
+        return False
+    if dev_nos != list(range(first_dev_no, first_dev_no + 4)):
+        return False
+    total_powers = [_sample_float(sample, "total_power_w") for sample in samples]
+    total_currents = [_sample_float(sample, "total_current_a") for sample in samples]
+    return (
+        total_powers[0] is not None
+        and total_powers[0] > 0.0
+        and all((value or 0.0) == 0.0 for value in total_powers[1:])
+        and total_currents[0] is not None
+        and total_currents[0] > 0.0
+        and all((value or 0.0) == 0.0 for value in total_currents[1:])
+    )
 
 
 def _parse_mobilint_status_query_metrics(
@@ -893,6 +1077,9 @@ def _normalize_status_hex(value: object) -> Optional[str]:
 
 
 def _parse_mobilint_status_metrics(status_output: str):
+    metrics = _parse_mobilint_status_table_metrics(status_output)
+    if metrics is not None:
+        return metrics
     metrics = _parse_mobilint_status_query_metrics(status_output)
     if metrics is not None:
         return metrics
@@ -967,7 +1154,12 @@ def _run_status_command(command: list[str]) -> Optional[str]:
 
     if result.returncode != 0 or not result.stdout:
         return None
-    return result.stdout.strip()
+    return _strip_ansi_sequences(result.stdout).strip()
+
+
+def _strip_ansi_sequences(value: str) -> str:
+    """Remove terminal ANSI escape sequences from mobilint-cli output."""
+    return _ANSI_ESCAPE_RE.sub("", value)
 
 
 def _legacy_status_json_command() -> list[str]:
