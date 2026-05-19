@@ -1,16 +1,16 @@
-import logging
 import re
 import time
 from typing import Optional, Union
 
 import numpy as np
 import psutil
-import pyRAPL
 
+from ._logging import suppress_pyrapl_optional_output_warnings
 from .device_tracker import BaseDeviceTracker
 from .static_info import get_host_static_info
 
-logging.getLogger().setLevel(logging.ERROR)
+with suppress_pyrapl_optional_output_warnings():
+    import pyRAPL
 
 
 class CPUDeviceTracker(BaseDeviceTracker):
