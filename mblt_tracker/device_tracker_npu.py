@@ -210,6 +210,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
             metrics[f"p99_{key}"] = _p99_or_none(values)
             metrics[f"max_{key}"] = _max_or_none(values)
         metrics["memory_total_mb"] = self._memory_total_mb
+        _add_generic_metric_aliases(metrics)
         metrics["samples"] = len(self._traces["total_power_w"])
         for key, trace in self._traces.items():
             metrics[f"{key}_samples"] = len(trace)
@@ -414,6 +415,27 @@ def _avg_optional(samples: list[dict[str, Any]], key: str) -> float | None:
 def _sample_float(sample: dict[str, Any], key: str) -> float | None:
     value = sample.get(key)
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _add_generic_metric_aliases(metrics: dict[str, Any]) -> None:
+    """Add CPU/GPU-compatible metric names while preserving NPU-specific keys."""
+    aliases = {
+        "avg_power_w": "avg_total_power_w",
+        "p99_power_w": "p99_total_power_w",
+        "max_power_w": "max_total_power_w",
+        "avg_utilization_pct": "avg_total_utilization_pct",
+        "p99_utilization_pct": "p99_total_utilization_pct",
+        "max_utilization_pct": "max_total_utilization_pct",
+        "avg_memory_used_mb": "avg_memory_usage_mb",
+        "p99_memory_used_mb": "p99_memory_usage_mb",
+        "max_memory_used_mb": "max_memory_usage_mb",
+        "total_memory_mb": "memory_total_mb",
+        "avg_memory_used_pct": "avg_memory_usage_pct",
+        "p99_memory_used_pct": "p99_memory_usage_pct",
+        "max_memory_used_pct": "max_memory_usage_pct",
+    }
+    for alias, source in aliases.items():
+        metrics[alias] = metrics.get(source)
 
 
 def _mean_or_none(values: list[float]) -> float | None:

@@ -689,23 +689,23 @@ Uses **mbltml** for OS-independent Mobilint NPU telemetry on Linux and Windows.
 
 ## 📝 Metric Output Format
 
-Calling `get_metric()` returns a dictionary with standardized cross-device keys where applicable. Missing or unavailable measurements are returned as `None`.
+Calling `get_metric()` returns a dictionary with standardized cross-device keys where applicable. Missing or unavailable measurements are returned as `None`. Trackers may also include device-specific aliases or detailed telemetry keys; for example, NPU total telemetry keeps explicit `total_*` / `memory_usage_*` names while also exposing the standardized keys below for compatibility with CPU/GPU consumers.
 
 ```json
 {
-  "avg_total_power_w": 25.4,
-  "p99_total_power_w": 40.1,
-  "max_total_power_w": 45.2,
-  "avg_total_utilization_pct": 78.5,
-  "p99_total_utilization_pct": 90.0,
-  "max_total_utilization_pct": 95.0,
-  "avg_memory_usage_mb": 2048.0,
-  "p99_memory_usage_mb": 3072.0,
-  "max_memory_usage_mb": 4096.0,
-  "memory_total_mb": 8192.0,
-  "avg_memory_usage_pct": 25.0,
-  "p99_memory_usage_pct": 37.5,
-  "max_memory_usage_pct": 50.0,
+  "avg_power_w": 25.4,
+  "p99_power_w": 40.1,
+  "max_power_w": 45.2,
+  "avg_utilization_pct": 78.5,
+  "p99_utilization_pct": 90.0,
+  "max_utilization_pct": 95.0,
+  "avg_memory_used_mb": 2048.0,
+  "p99_memory_used_mb": 3072.0,
+  "max_memory_used_mb": 4096.0,
+  "total_memory_mb": 8192.0,
+  "avg_memory_used_pct": 25.0,
+  "p99_memory_used_pct": 37.5,
+  "max_memory_used_pct": 50.0,
   "avg_temperature_c": 72.3,
   "p99_temperature_c": 79.0,
   "max_temperature_c": 80.0,
@@ -718,7 +718,7 @@ Tracker-specific fields may also be present:
 - **CPU**: `cpu` contains per-socket statistics keyed by socket ID.
 - **GPU**: `gpu` contains per-GPU statistics keyed by GPU index. GPU-specific summary keys include `avg_gpu_util_pct`, `p99_gpu_util_pct`, `max_gpu_util_pct`, `avg_mem_util_pct`, and `p99_mem_util_pct`.
 - **DRAM**: DRAM-specific power keys include `avg_dram_power_w`, `p99_dram_power_w`, and `max_dram_power_w`. `dram` contains per-socket statistics keyed by socket ID.
-- **NPU**: NPU-specific keys include total device telemetry (`avg_total_power_w`, `avg_total_current_a`, `avg_total_voltage_v`), utilization (`avg_total_utilization_pct`), memory (`avg_memory_usage_mb`, `memory_total_mb`, `avg_memory_usage_pct`), temperature, and rail-specific telemetry (`avg_npu_rail_power_w`, `avg_ddr_rail_power_w`, `avg_pmic_rail_power_w`, `avg_goldfinger_rail_power_w`, plus matching current/voltage keys when available). `devices` contains per-`mbltml` device statistics keyed by device index. `rail_metrics` documents the selected rails and the 1-second firmware refresh limitation for extra rails.
+- **NPU**: NPU-specific keys include total device telemetry (`avg_total_power_w`, `avg_total_current_a`, `avg_total_voltage_v`), utilization (`avg_total_utilization_pct`), memory (`avg_memory_usage_mb`, `memory_total_mb`, `avg_memory_usage_pct`), temperature, and rail-specific telemetry (`avg_npu_rail_power_w`, `avg_ddr_rail_power_w`, `avg_pmic_rail_power_w`, `avg_goldfinger_rail_power_w`, plus matching current/voltage keys when available). For compatibility with CPU/GPU consumers, NPU total telemetry is also exposed through standardized aliases such as `avg_power_w`, `avg_utilization_pct`, `avg_memory_used_mb`, and `total_memory_mb`. `devices` contains per-`mbltml` device statistics keyed by device index. `rail_metrics` documents the selected rails and the 1-second firmware refresh limitation for extra rails.
 
 ### Time-Series Trace APIs
 

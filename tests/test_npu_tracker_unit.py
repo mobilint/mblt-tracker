@@ -128,9 +128,14 @@ def test_npu_default_sampling_uses_mbltml_without_rail_selection(fake_mbltml, mo
     assert tracker.get_npu_rail_power_trace() == [(100.0, 5.0)]
     metrics = tracker.get_metric()
     assert metrics["avg_total_power_w"] == 21.0
+    assert metrics["avg_power_w"] == 21.0
     assert metrics["avg_npu_rail_power_w"] == 5.0
     assert metrics["avg_total_utilization_pct"] == pytest.approx(37.5)
+    assert metrics["avg_utilization_pct"] == pytest.approx(37.5)
+    assert metrics["avg_memory_used_mb"] == 768.0
+    assert metrics["avg_memory_used_pct"] == 37.5
     assert metrics["memory_total_mb"] == 2048.0
+    assert metrics["total_memory_mb"] == 2048.0
     assert metrics["devices"][0]["node_name"] == "aries0"
     assert metrics["rail_metrics"] == {
         "selected": ["npu"],
@@ -149,6 +154,32 @@ def test_npu_id_filters_mbltml_devices(fake_mbltml, monkeypatch):
     assert tracker.get_trace() == [(100.0, 11.0)]
     assert tracker.get_npu_rail_power_trace() == [(100.0, 3.0)]
     assert list(metrics["devices"]) == [1]
+
+
+def test_npu_metric_generic_aliases_preserve_specific_keys(fake_mbltml, monkeypatch):
+    tracker = NPUDeviceTracker(interval=0.1, npu_id=0)
+    monkeypatch.setattr(npu_module.time, "time", lambda: 100.0)
+
+    tracker._func_for_sched()
+    metrics = tracker.get_metric()
+
+    aliases = {
+        "avg_power_w": "avg_total_power_w",
+        "p99_power_w": "p99_total_power_w",
+        "max_power_w": "max_total_power_w",
+        "avg_utilization_pct": "avg_total_utilization_pct",
+        "p99_utilization_pct": "p99_total_utilization_pct",
+        "max_utilization_pct": "max_total_utilization_pct",
+        "avg_memory_used_mb": "avg_memory_usage_mb",
+        "p99_memory_used_mb": "p99_memory_usage_mb",
+        "max_memory_used_mb": "max_memory_usage_mb",
+        "total_memory_mb": "memory_total_mb",
+        "avg_memory_used_pct": "avg_memory_usage_pct",
+        "p99_memory_used_pct": "p99_memory_usage_pct",
+        "max_memory_used_pct": "max_memory_usage_pct",
+    }
+    for alias, source in aliases.items():
+        assert metrics[alias] == metrics[source]
 
 
 def test_extra_rail_samples_wait_for_firmware_refresh(fake_mbltml, monkeypatch):
