@@ -25,7 +25,7 @@ dependencies = [
     "apscheduler>=3.11.2",
     "pyRAPL>=0.2.3.1",
     "psutil>=7.0.0",
-    "mbltml",
+    "mbltml>=0.0.0",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -129,6 +129,3 @@ ignore_missing_imports = true
 [tool.coverage.run]
 source = ["mblt_tracker"]
 omit = ["tests/*"]
-
-[tool.uv.sources]
-mbltml = { path = "mbltml-0.0.0+63476c7a-py3-none-win_amd64.whl" }
