@@ -25,12 +25,10 @@ from mblt_tracker.static_info import (
     _read_windows_pci_link_properties,
     get_cpu_power_policy,
     get_host_static_info,
-    get_linux_npu_driver_firmware_info,
     get_nvml_gpu_static_info,
     get_pcie_static_info,
     get_windows_npu_driver_firmware_info,
     get_windows_power_policy,
-    parse_mobilint_status_static_info,
 )
 
 
@@ -1363,100 +1361,3 @@ def test_get_windows_npu_driver_firmware_info_honors_pcie_filters(monkeypatch) -
     }
 
 
-def test_get_linux_npu_driver_firmware_info_skips_when_filtered_npus_empty(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(static_info.platform, "system", lambda: "Linux")
-
-    def fail_run_command(_command):
-        raise AssertionError("mobilint-cli status should not be called")
-
-    monkeypatch.setattr(static_info, "run_command", fail_run_command)
-
-    assert get_linux_npu_driver_firmware_info(npu_devices=[]) == {}
-
-
-def test_get_linux_npu_driver_firmware_info_limits_metadata_to_filtered_npus(
-    monkeypatch,
-) -> None:
-    status_output = """
-Drivers - Aries: 1.8.1 Regulus: 1.12.0 |
-| 0 Aries(Board-A) | 42 C 2.0.1 |
-| 0 42 C 2.0.1 |
-| 1 Aries(Board-B) | 43 C 2.0.2 |
-| 1 43 C 2.0.2 |
-"""
-    monkeypatch.setattr(static_info.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(static_info, "run_command", lambda _command: status_output)
-
-    info = get_linux_npu_driver_firmware_info(npu_devices=[{"dev_no": 1}])
-
-    hardware = cast(dict[str, object], info["hardware"])
-    assert hardware["npus"] == [
-        {"dev_no": 1, "board_name": "Board-B", "firmware": {"version": "2.0.2"}}
-    ]
-    assert info["inference"] == {
-        "npu_driver_version": "1.8.1",
-        "driver": {"aries_version": "1.8.1", "regulus_version": "1.12.0"},
-    }
-
-
-def test_parse_mobilint_status_query_static_info_assigns_mla400_card_ids_by_group() -> None:
-    def mla400_device(dev_no: int) -> str:
-        return f"""/dev/aries{dev_no}
-    Product                   : Aries
-    Firmware
-        Version               : 1.2.5 (Rev: 0)
-    Power
-        Total                 : 0.00 W
-        NPU                   : 4.00 W
-        GOLDFINGER            : 0.00 W
-    PCI Express
-        Vendor ID             : 0x209F
-        Device ID             : 0x0
-        Sub Vendor ID         : 0x402
-        Sub Device ID         : 0x108B
-"""
-
-    status_output = """Timestamp                     : 2026-05-07 15:29:48
-Driver Version (Aries)        : 1.12.0 (Rev: 1)
-Driver Version (Regulus)      : N/A
-Connected NPUs                : 8
-""" + "".join(mla400_device(dev_no) for dev_no in range(8))
-
-    info = parse_mobilint_status_static_info(status_output)
-
-    hardware = cast(dict[str, object], info["hardware"])
-    npus = cast(list[dict[str, object]], hardware["npus"])
-    assert [npu["dev_no"] for npu in npus] == list(range(8))
-    assert [npu["card_model"] for npu in npus] == ["MLA400"] * 8
-    assert [npu["card_id"] for npu in npus] == [0, 0, 0, 0, 1, 1, 1, 1]
-
-
-def test_parse_mobilint_status_query_static_info_keeps_mla400_offset_card_id() -> None:
-    def mla400_device(dev_no: int) -> str:
-        return f"""/dev/aries{dev_no}
-    Product                   : Aries
-    Power
-        Total                 : 0.00 W
-        NPU                   : 4.00 W
-        GOLDFINGER            : 0.00 W
-    PCI Express
-        Vendor ID             : 0x209F
-        Device ID             : 0x0
-        Sub Vendor ID         : 0x402
-        Sub Device ID         : 0x108B
-"""
-
-    status_output = """Timestamp                     : 2026-05-07 15:29:48
-Driver Version (Aries)        : 1.12.0 (Rev: 1)
-Driver Version (Regulus)      : N/A
-Connected NPUs                : 4
-""" + "".join(mla400_device(dev_no) for dev_no in range(4, 8))
-
-    info = parse_mobilint_status_static_info(status_output)
-
-    hardware = cast(dict[str, object], info["hardware"])
-    npus = cast(list[dict[str, object]], hardware["npus"])
-    assert [npu["dev_no"] for npu in npus] == [4, 5, 6, 7]
-    assert [npu["card_id"] for npu in npus] == [1, 1, 1, 1]

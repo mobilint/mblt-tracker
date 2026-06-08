@@ -25,6 +25,7 @@ dependencies = [
     "apscheduler>=3.11.2",
     "pyRAPL>=0.2.3.1",
     "psutil>=7.0.0",
+    "mbltml",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -74,9 +75,6 @@ dev = [
 # Tools setting -----------------------------------------
 [tool.setuptools]
 packages = { find = { where = ["."], include = ["mblt_tracker", "mblt_tracker.*"] } }
-
-[tool.setuptools.package-data]
-mblt_tracker = ["*.sh"]
 
 [tool.setuptools.dynamic]
 version = { attr = "mblt_tracker.__version__" }
@@ -131,3 +129,6 @@ ignore_missing_imports = true
 [tool.coverage.run]
 source = ["mblt_tracker"]
 omit = ["tests/*"]
+
+[tool.uv.sources]
+mbltml = { path = "mbltml-0.0.0+63476c7a-py3-none-win_amd64.whl" }
