@@ -22,6 +22,7 @@ class FakeMbltml:
     MBLTML_EXTRA_PMIC_ID_DDR: int = 1
     MBLTML_EXTRA_PMIC_ID_PMIC: int = 2
     MBLTML_EXTRA_PMIC_ID_GOLDFINGER: int = 3
+    init_device_types: set[int] = field(default_factory=set)
     selected_rail: dict[int, int] = field(default_factory=lambda: {0: 0, 1: 0})
     set_calls: list[tuple[int, int]] = field(default_factory=list)
 
@@ -77,7 +78,11 @@ class FakeMbltml:
         return 12.0
 
     def mbltmlGetDriverVersion(self, device_type):
-        return "1.2.3"
+        return {
+            self.MBLTML_DEVICE_ARIES: "1.2.3",
+            self.MBLTML_DEVICE_REGULUS: "4.5.6",
+            self.MBLTML_DEVICE_REGULUS_USB: "7.8.9",
+        }[device_type]
 
     def mbltmlGetFirmwareVersion(self, dev_no):
         return "2.0.1"
@@ -123,6 +128,11 @@ def test_npu_default_sampling_uses_mbltml_without_rail_selection(fake_mbltml, mo
 
     tracker._func_for_sched()
 
+    assert fake_mbltml.init_device_types == {
+        fake_mbltml.MBLTML_DEVICE_ARIES,
+        fake_mbltml.MBLTML_DEVICE_REGULUS,
+        fake_mbltml.MBLTML_DEVICE_REGULUS_USB,
+    }
     assert fake_mbltml.set_calls == []
     assert tracker.get_trace() == [(100.0, 21.0)]
     assert tracker.get_npu_rail_power_trace() == [(100.0, 5.0)]
@@ -219,7 +229,14 @@ def test_get_static_info_merges_mbltml_metadata(fake_mbltml, monkeypatch):
     tracker = NPUDeviceTracker(npu_id=0)
     info = tracker.get_static_info()
 
-    assert info["inference"]["npu_driver_version"] == "1.2.3"
+    assert info["inference"] == {
+        "npu_driver_version": "1.2.3",
+        "driver": {
+            "aries_version": "1.2.3",
+            "regulus_version": "4.5.6",
+            "regulus_usb_version": "7.8.9",
+        },
+    }
     assert info["hardware"]["npus"][0] == {
         "dev_no": 0,
         "vendor_id": "0x209f",
@@ -236,3 +253,33 @@ def test_get_static_info_merges_mbltml_metadata(fake_mbltml, monkeypatch):
         "class": "0x7800002",
         "memory_total_bytes": 1073741824,
     }
+
+
+def test_get_static_info_limits_mbltml_metadata_to_selected_npu(
+    fake_mbltml, monkeypatch
+) -> None:
+    monkeypatch.setattr(npu_module, "get_all_pcie_devices", lambda: [])
+    monkeypatch.setattr(npu_module, "get_pcie_static_info", lambda **kwargs: {})
+
+    tracker = NPUDeviceTracker(npu_id=1)
+
+    info = tracker.get_static_info()
+
+    assert info["hardware"]["npus"] == [
+        {
+            "dev_no": 1,
+            "node_name": "aries1",
+            "device_type": "Aries",
+            "hardware_version": "Aries2",
+            "firmware": {"version": "2.0.1", "revision": "7"},
+            "vendor_id": "0x209f",
+            "device_id": "0x0",
+            "subsystem_vendor_id": "0x402",
+            "subsystem_device_id": "0x108b",
+            "link_generation": 4,
+            "lane_width": 8,
+            "revision": "0x2",
+            "class": "0x7800002",
+            "memory_total_bytes": 1073741824,
+        }
+    ]

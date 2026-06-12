@@ -289,7 +289,12 @@ class NPUDeviceTracker(BaseDeviceTracker):
             devices=pcie_devices,
             include_private_identifiers=True,
         )
-        _deep_merge(info, _get_mbltml_static_info())
+        mbltml_info = _get_mbltml_static_info()
+        _filter_static_info_to_device_indices(
+            mbltml_info,
+            set(self._selected_device_indices()),
+        )
+        _deep_merge(info, mbltml_info)
         return _sanitize_static_info_for_public_output(info)
 
     def reset(self) -> None:
@@ -325,9 +330,22 @@ def _ensure_mbltml_available() -> None:
 
 def _initialize_mbltml() -> None:
     try:
-        mbltml.mbltmlInitDevices({mbltml.MBLTML_DEVICE_ARIES})
+        mbltml.mbltmlInitDevices(_supported_mbltml_device_types())
     except AttributeError:
         mbltml.mbltmlInit()
+
+
+def _supported_mbltml_device_types() -> set[int]:
+    device_type_names = (
+        "MBLTML_DEVICE_ARIES",
+        "MBLTML_DEVICE_REGULUS",
+        "MBLTML_DEVICE_REGULUS_USB",
+    )
+    return {
+        device_type
+        for name in device_type_names
+        if isinstance((device_type := getattr(mbltml, name, None)), int)
+    }
 
 
 def _normalize_npu_ids(npu_id: int | list[int] | None) -> list[int] | None:
@@ -482,10 +500,46 @@ def _get_mbltml_static_info() -> dict[str, object]:
     device_count = _safe_call(mbltml.mbltmlGetDeviceCount, default=0)
     npus = [_get_mbltml_device_static_info(dev_no) for dev_no in range(device_count)]
     info: dict[str, object] = {"hardware": {"npus": [npu for npu in npus if npu]}}
-    aries_driver = _safe_call(mbltml.mbltmlGetDriverVersion, mbltml.MBLTML_DEVICE_ARIES)
-    if aries_driver is not None:
-        info["inference"] = {"npu_driver_version": aries_driver, "driver": {"aries_version": aries_driver}}
+    driver_versions = _get_mbltml_driver_versions()
+    if driver_versions:
+        info["inference"] = {
+            "npu_driver_version": driver_versions.get("aries_version")
+            or next(iter(driver_versions.values())),
+            "driver": driver_versions,
+        }
     return info
+
+
+def _get_mbltml_driver_versions() -> dict[str, str]:
+    driver_types = {
+        "aries_version": getattr(mbltml, "MBLTML_DEVICE_ARIES", None),
+        "regulus_version": getattr(mbltml, "MBLTML_DEVICE_REGULUS", None),
+        "regulus_usb_version": getattr(mbltml, "MBLTML_DEVICE_REGULUS_USB", None),
+    }
+    versions = {}
+    for key, device_type in driver_types.items():
+        if device_type is None:
+            continue
+        version = _safe_call(mbltml.mbltmlGetDriverVersion, device_type)
+        if version is not None:
+            versions[key] = version
+    return versions
+
+
+def _filter_static_info_to_device_indices(
+    info: dict[str, object], selected_indices: set[int]
+) -> None:
+    hardware = info.get("hardware")
+    if not isinstance(hardware, dict):
+        return
+    npus = hardware.get("npus")
+    if not isinstance(npus, list):
+        return
+    hardware["npus"] = [
+        npu
+        for npu in npus
+        if isinstance(npu, dict) and npu.get("dev_no") in selected_indices
+    ]
 
 
 def _get_mbltml_device_static_info(dev_no: int) -> dict[str, object]:

@@ -85,7 +85,7 @@ def test_collect_never_creates_sudo_prompt_provider(monkeypatch, capsys) -> None
     }
 
 
-def test_collect_static_info_merges_windows_npu_driver_metadata(monkeypatch) -> None:
+def test_collect_static_info_merges_mbltml_npu_driver_metadata(monkeypatch) -> None:
     monkeypatch.setattr(
         cli,
         "get_host_static_info",
@@ -120,7 +120,7 @@ def test_collect_static_info_merges_windows_npu_driver_metadata(monkeypatch) -> 
     }
 
 
-def test_collect_static_info_merges_linux_npu_driver_firmware_metadata(
+def test_collect_static_info_merges_mbltml_npu_firmware_metadata(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -135,7 +135,6 @@ def test_collect_static_info_merges_linux_npu_driver_firmware_metadata(
         "get_pcie_static_info",
         lambda **_kwargs: {"hardware": {"npus": [{"vendor_id": "0x209f"}]}},
     )
-    monkeypatch.setattr(cli, "_collect_mbltml_npu_metadata", lambda **_kwargs: {})
     monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
     monkeypatch.setattr(cli, "get_nvml_gpu_static_info", lambda **_kwargs: {})
     monkeypatch.setattr(
@@ -217,7 +216,6 @@ def test_collect_static_info_removes_os_link_fields_for_nvml_gpu_match(
             }
         },
     )
-    monkeypatch.setattr(cli, "_collect_mbltml_npu_metadata", lambda **_kwargs: {})
     monkeypatch.setattr(cli, "_collect_mbltml_npu_metadata", lambda **_kwargs: {})
 
     info = cli.collect_static_info()
@@ -328,20 +326,21 @@ def test_collect_static_info_does_not_limit_npu_metadata_without_pcie_filter(
     monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
     monkeypatch.setattr(cli, "get_pcie_static_info", lambda **_kwargs: {})
     monkeypatch.setattr(cli, "get_nvml_gpu_static_info", lambda **_kwargs: {})
-    monkeypatch.setattr(cli, "_collect_mbltml_npu_metadata", lambda **_kwargs: {})
 
-    def fake_linux_metadata(**kwargs):
+    def fake_mbltml_metadata(**kwargs):
         calls.update(kwargs)
         return {}
 
-    monkeypatch.setattr(cli, "_collect_mbltml_npu_metadata", fake_linux_metadata)
+    monkeypatch.setattr(cli, "_collect_mbltml_npu_metadata", fake_mbltml_metadata)
 
     cli.collect_static_info()
 
     assert calls == {"filtered_npus": None}
 
 
-def test_collect_static_info_does_not_add_unfiltered_npu_metadata(monkeypatch) -> None:
+def test_collect_static_info_skips_mbltml_npu_metadata_when_filter_matches_no_npus(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(
         cli,
         "get_host_static_info",
@@ -352,14 +351,6 @@ def test_collect_static_info_does_not_add_unfiltered_npu_metadata(monkeypatch) -
     monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
     monkeypatch.setattr(cli, "get_pcie_static_info", lambda **_kwargs: {})
     monkeypatch.setattr(cli, "get_nvml_gpu_static_info", lambda **_kwargs: {})
-    monkeypatch.setattr(
-        cli,
-        "_collect_mbltml_npu_metadata",
-        lambda **_kwargs: {
-            "hardware": {"npus": [{"vendor_id": "0x209f"}]},
-            "inference": {"npu_driver_version": "1.8.1.1348"},
-        },
-    )
     monkeypatch.setattr(
         cli,
         "_collect_mbltml_npu_metadata",
