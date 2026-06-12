@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, TextIO, cast
+from typing import Any, TextIO, cast
 
 from ._types import CollectOutput
 from .static_info import (
@@ -62,7 +62,9 @@ def collect_static_info(
         nvml_gpu_info,
     )
     if npu_metadata_filter != []:
-        _deep_merge(info, _collect_mbltml_npu_metadata(filtered_npus=npu_metadata_filter))
+        _deep_merge(
+            info, _collect_mbltml_npu_metadata(filtered_npus=npu_metadata_filter)
+        )
     public_info = _sanitize_static_info_for_public_output(info)
     return cast(CollectOutput, _clean_typed_dict(public_info, CollectOutput))
 
@@ -174,15 +176,73 @@ def _filter_npu_metadata_to_selected_devices(
         if not isinstance(metadata, dict):
             continue
         for selected_device in selected_devices:
-            if metadata.get("dev_no") == selected_device.get("dev_no"):
-                selected.append(metadata)
-                break
-            if str(metadata.get("vendor_id", "")).lower() == str(
-                selected_device.get("vendor_id", "")
-            ).lower():
+            if _npu_metadata_matches_selected_device(metadata, selected_device):
                 selected.append(metadata)
                 break
     hardware["npus"] = selected
+
+
+def _npu_metadata_matches_selected_device(
+    metadata: Mapping[str, object], selected_device: Mapping[str, object]
+) -> bool:
+    """Return whether mbltml metadata belongs to a filtered PCIe NPU device.
+
+    Avoid vendor-only matching because one host can contain multiple Mobilint
+    NPUs with the same vendor ID. Prefer stable runtime/OS identities first,
+    then require at least vendor_id and device_id for PCI ID matching.
+    """
+    metadata_dev_no = metadata.get("dev_no")
+    selected_dev_no = selected_device.get("dev_no")
+    if metadata_dev_no is not None and selected_dev_no is not None:
+        return metadata_dev_no == selected_dev_no
+
+    for key in ("bus_address", "pnp_device_id"):
+        metadata_value = metadata.get(key)
+        selected_value = selected_device.get(key)
+        if metadata_value is not None and selected_value is not None:
+            return str(metadata_value).lower() == str(selected_value).lower()
+
+    return _pci_identity_matches(metadata, selected_device)
+
+
+def _pci_identity_matches(
+    metadata: Mapping[str, object], selected_device: Mapping[str, object]
+) -> bool:
+    required_keys = ("vendor_id", "device_id")
+    if not all(_normalized_identity(metadata.get(key)) for key in required_keys):
+        return False
+    if not all(_normalized_identity(selected_device.get(key)) for key in required_keys):
+        return False
+
+    for key in required_keys:
+        if _normalized_identity(metadata.get(key)) != _normalized_identity(
+            selected_device.get(key)
+        ):
+            return False
+
+    for key in ("subsystem_vendor_id", "subsystem_device_id"):
+        metadata_value = _normalized_identity(metadata.get(key))
+        selected_value = _normalized_identity(selected_device.get(key))
+        if metadata_value is not None and selected_value is not None:
+            if metadata_value != selected_value:
+                return False
+    return True
+
+
+def _normalized_identity(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text.startswith("0x"):
+        try:
+            return f"0x{int(text, 16):x}"
+        except ValueError:
+            return text
+    if all(char in "0123456789abcdef" for char in text):
+        return f"0x{int(text, 16):x}"
+    return text
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -226,7 +286,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _write_json(info: Mapping[str, object], output: Path | None, stdout: TextIO) -> None:
+def _write_json(
+    info: Mapping[str, object], output: Path | None, stdout: TextIO
+) -> None:
     text = json.dumps(cast(Any, info), indent=2, sort_keys=True) + "\n"
     if output is None:
         stdout.write(text)

@@ -12,7 +12,7 @@ dynamic = ["version"]
 description = "A Python library to track device usage, such as Mobilint NPU, NVIDIA GPU, Intel CPU, ..."
 readme = "README.md"
 license = { text = "BSD-3-Clause" }
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.10,<3.13"
 keywords = [
     "python", "energy", "power", "utilization", "memory", 
     "energy-consumption", "NPU", "Mobilint", "GPU", 
@@ -37,7 +37,6 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -94,7 +93,7 @@ dev = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [
@@ -120,7 +119,7 @@ addopts = "-ra -q --timeout=300"
 testpaths = ["tests"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

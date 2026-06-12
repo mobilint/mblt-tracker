@@ -55,9 +55,11 @@ def test_get_cuda_version_falls_back_to_nvcc(monkeypatch) -> None:
     monkeypatch.setattr(
         static_info,
         "run_command",
-        lambda command: "Cuda compilation tools, release 12.4, V12.4.131\n"
-        if command == ["nvcc", "--version"]
-        else None,
+        lambda command: (
+            "Cuda compilation tools, release 12.4, V12.4.131\n"
+            if command == ["nvcc", "--version"]
+            else None
+        ),
     )
 
     assert _get_cuda_version() == "12.4"
@@ -263,7 +265,7 @@ def test_get_nvml_gpu_static_info_matches_windows_pcie_by_nvidia_order(
             "current_link_width": "4",
             "max_link_speed": "32.0 GT/s PCIe",
             "max_link_width": "8",
-        }
+        },
     ]
 
     info = get_nvml_gpu_static_info(pcie_devices=pcie_devices)
@@ -367,7 +369,9 @@ def test_get_python_package_version_reads_module_version(monkeypatch) -> None:
     assert _get_python_package_version("qbruntime") == "1.2.3"
 
 
-def test_get_python_package_version_returns_none_when_not_installed(monkeypatch) -> None:
+def test_get_python_package_version_returns_none_when_not_installed(
+    monkeypatch,
+) -> None:
     monkeypatch.setitem(sys.modules, "qbcompiler", None)
 
     assert _get_python_package_version("qbcompiler") is None
@@ -387,9 +391,7 @@ def test_get_python_package_version_falls_back_to_metadata_on_import_runtime_fai
     monkeypatch.setattr(
         static_info.metadata,
         "version",
-        lambda package_name: "2.3.4"
-        if package_name == "mobilint-qb-runtime"
-        else None,
+        lambda package_name: "2.3.4" if package_name == "mobilint-qb-runtime" else None,
     )
 
     assert _get_python_package_version("qbruntime") == "2.3.4"
@@ -502,7 +504,9 @@ def test_get_host_static_info_linux_handles_unavailable_dmidecode_without_passwo
     monkeypatch.setattr(static_info.platform, "version", lambda: "test-version")
     monkeypatch.setattr(static_info.platform, "release", lambda: "test-release")
     monkeypatch.setattr(static_info.platform, "processor", lambda: "")
-    monkeypatch.setattr(static_info.platform, "uname", lambda: types.SimpleNamespace(processor=""))
+    monkeypatch.setattr(
+        static_info.platform, "uname", lambda: types.SimpleNamespace(processor="")
+    )
     monkeypatch.setattr(static_info.psutil, "cpu_count", lambda logical=True: 4)
     monkeypatch.setattr(
         static_info.psutil,
@@ -511,12 +515,16 @@ def test_get_host_static_info_linux_handles_unavailable_dmidecode_without_passwo
     )
     monkeypatch.setattr(static_info, "_linux_cpu_identity", lambda: (None, None))
     monkeypatch.setattr(static_info, "_read_os_release", lambda: {})
-    monkeypatch.setattr(static_info, "get_cpu_power_policy", lambda: {
-        "governor": None,
-        "power_plan": None,
-        "min_processor_state_pct": None,
-        "max_processor_state_pct": None,
-    })
+    monkeypatch.setattr(
+        static_info,
+        "get_cpu_power_policy",
+        lambda: {
+            "governor": None,
+            "power_plan": None,
+            "min_processor_state_pct": None,
+            "max_processor_state_pct": None,
+        },
+    )
     monkeypatch.setattr(static_info, "_get_cuda_version", lambda: None)
     monkeypatch.setattr(static_info, "_get_python_package_version", lambda _name: None)
 
@@ -759,7 +767,9 @@ def test_calculate_theoretical_bandwidth_gbps_falls_back_to_nominal_speed() -> N
     assert _calculate_theoretical_bandwidth_gbps(dimms) == 44.8
 
 
-def test_calculate_theoretical_bandwidth_gbps_returns_none_without_required_fields() -> None:
+def test_calculate_theoretical_bandwidth_gbps_returns_none_without_required_fields() -> (
+    None
+):
     assert _calculate_theoretical_bandwidth_gbps([{"speed_mhz": 3200}]) is None
 
 
@@ -1127,10 +1137,7 @@ def test_get_pcie_static_info_filters_windows_devices_by_auxiliary_class(
 
 
 def test_parse_windows_active_power_scheme_english_output() -> None:
-    output = (
-        "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e "
-        "(Balanced)\n"
-    )
+    output = "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e (Balanced)\n"
 
     scheme_guid, power_plan = _parse_windows_active_power_scheme(output)
 
@@ -1139,10 +1146,7 @@ def test_parse_windows_active_power_scheme_english_output() -> None:
 
 
 def test_parse_windows_active_power_scheme_korean_output() -> None:
-    output = (
-        "전원 구성표 GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c "
-        "(고성능)\n"
-    )
+    output = "전원 구성표 GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c (고성능)\n"
 
     scheme_guid, power_plan = _parse_windows_active_power_scheme(output)
 
@@ -1316,8 +1320,7 @@ def test_get_windows_npu_driver_firmware_info_uses_pnp_metadata(monkeypatch) -> 
                         "name": "MOBILINT NPU Accelerator",
                     }
                 ]
-            }
-            ,
+            },
             "inference": {"npu_driver_version": "1.8.1.1348"},
         },
     )
@@ -1359,5 +1362,3 @@ def test_get_windows_npu_driver_firmware_info_honors_pcie_filters(monkeypatch) -
         "class_filter": "0x12",
         "devices": pcie_devices,
     }
-
-
