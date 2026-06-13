@@ -385,6 +385,35 @@ def test_all_rail_sampling_inserts_npu_slot_between_extra_rails(
     assert fake_mbltml.set_calls[-1] == (0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_PMIC)
     assert tracker.get_pmic_rail_power_trace() == []
 
+    now = 104.0
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker._func_for_sched()
+    assert tracker.get_pmic_rail_power_trace() == [(104.0, 4.0)]
+    assert fake_mbltml.set_calls[-1] == (0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_NPU)
+
+    now = 105.0
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker._func_for_sched()
+    assert tracker.get_npu_rail_power_trace() == [(102.0, 2.0), (105.0, 2.0)]
+
+    now = 106.0
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker._func_for_sched()
+    assert fake_mbltml.set_calls[-1] == (
+        0,
+        fake_mbltml.MBLTML_EXTRA_PMIC_ID_GOLDFINGER,
+    )
+    assert tracker.get_goldfinger_rail_power_trace() == []
+
+    now = 107.0
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker._func_for_sched()
+    assert tracker.get_goldfinger_rail_power_trace() == [(107.0, 5.0)]
+
+    metrics = tracker.get_metric()
+    for rail in metrics["rail_metrics"]["selected"]:
+        assert metrics[f"{rail}_rail_power_w_samples"] > 0
+
 
 def test_invalid_npu_id_and_rail_are_rejected(fake_mbltml):
     with pytest.raises(ValueError, match="Invalid NPU ID"):

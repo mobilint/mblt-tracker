@@ -8,6 +8,7 @@ import json
 import pprint
 import time
 
+import mbltml
 import numpy as np
 import pytest
 
@@ -32,10 +33,26 @@ YOLO11m = vision.YOLO11m
 tqdm = tqdm_module.tqdm
 
 
+def _expected_available_all_mode_rails() -> list[str]:
+    """Return all-mode rails expected to be available on the current device."""
+    rails = ["npu", "ddr", "pmic"]
+    device_count = mbltml.mbltmlGetDeviceCount()
+    aries_type = getattr(mbltml, "MBLTML_DEVICE_ARIES", None)
+    aries_devices = sum(
+        1
+        for dev_no in range(device_count)
+        if mbltml.mbltmlGetDeviceType(dev_no) == aries_type
+    )
+    if aries_devices >= 4:
+        rails.append("goldfinger")
+    return rails
+
+
 def test_npu_all_rail_tracking_records_npu_samples() -> None:
     tracker = NPUDeviceTracker(interval=1.0, rail_metrics="all")
     model = YOLO11m()
     x = np.random.randint(0, 256, (1, 640, 640, 3), dtype=np.uint8)
+    expected_sampled_rails = _expected_available_all_mode_rails()
 
     for _ in range(3):
         model(x)
@@ -43,7 +60,7 @@ def test_npu_all_rail_tracking_records_npu_samples() -> None:
     tracker.start()
     start_time = time.time()
     try:
-        while time.time() - start_time < 6.5:
+        while time.time() - start_time < 8.5:
             model(x)
     finally:
         tracker.stop()
@@ -56,12 +73,8 @@ def test_npu_all_rail_tracking_records_npu_samples() -> None:
         "pmic",
         "goldfinger",
     ]
-    assert metrics["npu_rail_power_w_samples"] > 0
-    assert (
-        metrics["ddr_rail_power_w_samples"]
-        + metrics["pmic_rail_power_w_samples"]
-        + metrics["goldfinger_rail_power_w_samples"]
-    ) > 0
+    for rail in expected_sampled_rails:
+        assert metrics[f"{rail}_rail_power_w_samples"] > 0
 
 
 if __name__ == "__main__":
