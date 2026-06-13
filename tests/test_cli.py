@@ -423,6 +423,16 @@ def test_collect_static_info_enriches_four_mbltml_npus_by_pcie_order(
     ]
 
 
-def test_collect_parser_rejects_removed_pcie_npu_filter_option() -> None:
+@pytest.mark.parametrize(
+    "removed_option",
+    [
+        "--pcie-vendor-id",
+        "--pcie-device-id",
+        "--pcie-class-filter",
+    ],
+)
+def test_collect_parser_rejects_removed_pcie_filter_options(
+    removed_option: str,
+) -> None:
     with pytest.raises(SystemExit):
-        cli.build_parser().parse_args(["collect", "--npu-pci-vendor-id", "209f"])
+        cli.build_parser().parse_args(["collect", removed_option, "209f"])
