@@ -76,7 +76,6 @@ class NPUDeviceTracker(BaseDeviceTracker):
         self._rail_selected_at: dict[int, float] = dict.fromkeys(range(self._device_count), 0.0)
         self._pending_extra_rail: str | None = None
         self._next_extra_rail_index = 0
-        self._npu_sample_due_after_extra = False
         self._unavailable_extra_rails: set[str] = set()
         self.reset()
 
@@ -97,25 +96,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
     def _fetch_metric_samples(self) -> list[dict[str, Any]]:
         selected = self._selected_device_indices()
         now = time.time()
-        sample_npu_before_next_extra = (
-            self._npu_sample_due_after_extra
-            and "npu" in self._rail_metrics
-            and self._pending_extra_rail is None
-            and self._selected_devices_ready_for_rail("npu", selected, now)
-        )
-        wait_for_npu_refresh_after_extra = (
-            self._npu_sample_due_after_extra
-            and "npu" in self._rail_metrics
-            and self._pending_extra_rail is None
-            and not sample_npu_before_next_extra
-        )
-        extra_rail_to_read = (
-            None
-            if sample_npu_before_next_extra or wait_for_npu_refresh_after_extra
-            else self._advance_extra_rail_state(now)
-            if self._has_extra_rails
-            else None
-        )
+        extra_rail_to_read = self._advance_extra_rail_state(now)
         samples = []
         for dev_no in selected:
             sample = self._read_device_sample(dev_no, extra_rail_to_read, now)
@@ -123,24 +104,16 @@ class NPUDeviceTracker(BaseDeviceTracker):
                 samples.append(sample)
         if extra_rail_to_read is not None:
             self._complete_extra_rail_sample(extra_rail_to_read)
-        if sample_npu_before_next_extra and samples and all(
-            "npu_rail_power_w" in sample for sample in samples
-        ):
-            self._npu_sample_due_after_extra = False
         return samples
 
-    @property
-    def _has_extra_rails(self) -> bool:
-        return any(rail != "npu" for rail in self._rail_metrics)
-
     def _advance_extra_rail_state(self, now: float) -> str | None:
-        extra_rails = [rail for rail in self._rail_metrics if rail != "npu"]
-        if not extra_rails:
+        rail_cycle = list(self._rail_metrics)
+        if not rail_cycle:
             return None
         selected_devices = self._selected_device_indices()
         if self._pending_extra_rail is None:
-            for _ in range(len(extra_rails)):
-                rail = extra_rails[self._next_extra_rail_index % len(extra_rails)]
+            for _ in range(len(rail_cycle)):
+                rail = rail_cycle[self._next_extra_rail_index % len(rail_cycle)]
                 if rail in self._unavailable_extra_rails:
                     self._next_extra_rail_index += 1
                     continue
@@ -227,18 +200,6 @@ class NPUDeviceTracker(BaseDeviceTracker):
             selected_at = self._rail_selected_at.get(dev_no, 0.0)
             if now - selected_at >= _EXTRA_RAIL_REFRESH_PERIOD_S:
                 sample.update(_read_rail_values(dev_no, extra_rail_to_read))
-                if "npu" in self._rail_metrics and _set_extra_rail(dev_no, "npu"):
-                    self._selected_rail[dev_no] = "npu"
-                    self._rail_selected_at[dev_no] = now
-                    self._npu_sample_due_after_extra = True
-        elif "npu" in self._rail_metrics and self._pending_extra_rail is None:
-            if self._selected_rail.get(dev_no) == "npu":
-                selected_at = self._rail_selected_at.get(dev_no, 0.0)
-                if now - selected_at >= _EXTRA_RAIL_REFRESH_PERIOD_S:
-                    sample.update(_read_rail_values(dev_no, "npu"))
-            elif _set_extra_rail(dev_no, "npu"):
-                self._selected_rail[dev_no] = "npu"
-                self._rail_selected_at[dev_no] = now
         return sample
 
     def _restore_npu_rail_selection(self) -> None:
@@ -248,7 +209,6 @@ class NPUDeviceTracker(BaseDeviceTracker):
                 self._selected_rail[dev_no] = "npu"
                 self._rail_selected_at[dev_no] = now
         self._pending_extra_rail = None
-        self._npu_sample_due_after_extra = False
 
     def _record_samples(self, ts: float, samples: list[dict[str, Any]]) -> None:
         self._append("total_power_w", _sum(samples, "total_power_w"), ts)
