@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, TextIO, cast
+from typing import Any, TextIO, cast
 
 from ._types import CollectOutput
 from .static_info import (
@@ -13,19 +13,15 @@ from .static_info import (
     _deep_merge,
     _remove_os_pcie_link_fields,
     _sanitize_static_info_for_public_output,
+    enrich_mbltml_npus_with_pcie_info,
     get_all_pcie_devices,
     get_host_static_info,
-    get_linux_npu_driver_firmware_info,
     get_nvml_gpu_static_info,
     get_pcie_static_info,
-    get_windows_npu_driver_firmware_info,
 )
 
 
 def collect_static_info(
-    pcie_vendor_id: str | None = None,
-    pcie_device_id: str | None = None,
-    pcie_class_filter: str | None = None,
     all_pcie_devices: bool = False,
     sudo_password: str | None = None,
     sudo_password_provider: Callable[[], str] | None = None,
@@ -41,17 +37,10 @@ def collect_static_info(
         ),
     )
     pcie_info = get_pcie_static_info(
-        vendor_id=pcie_vendor_id,
-        device_id=pcie_device_id,
-        class_filter=pcie_class_filter,
         include_all_devices=all_pcie_devices,
         devices=pcie_devices,
         include_private_identifiers=True,
-    )
-    npu_metadata_filter = (
-        _extract_hardware_npus(pcie_info)
-        if _has_pcie_filter(pcie_vendor_id, pcie_device_id, pcie_class_filter)
-        else None
+        include_npus=False,
     )
     _deep_merge(info, pcie_info)
     nvml_gpu_info = get_nvml_gpu_static_info(
@@ -63,38 +52,16 @@ def collect_static_info(
         info,
         nvml_gpu_info,
     )
-    _deep_merge(
-        info,
-        _collect_windows_npu_metadata(
-            vendor_id=pcie_vendor_id,
-            device_id=pcie_device_id,
-            class_filter=pcie_class_filter,
-            devices=pcie_devices,
-            filtered_npus=npu_metadata_filter,
-        ),
+    npu_metadata = _collect_mbltml_npu_metadata()
+    pcie_npu_info = get_pcie_static_info(
+        devices=pcie_devices,
+        include_private_identifiers=True,
+        include_npus=True,
     )
-    _deep_merge(
-        info,
-        _collect_linux_npu_metadata(npu_metadata_filter),
-    )
+    enrich_mbltml_npus_with_pcie_info(npu_metadata, pcie_npu_info)
+    _deep_merge(info, npu_metadata)
     public_info = _sanitize_static_info_for_public_output(info)
     return cast(CollectOutput, _clean_typed_dict(public_info, CollectOutput))
-
-
-def _has_pcie_filter(
-    vendor_id: str | None, device_id: str | None, class_filter: str | None
-) -> bool:
-    return any(value is not None for value in (vendor_id, device_id, class_filter))
-
-
-def _extract_hardware_npus(info: Mapping[str, object]) -> list[dict[str, object]]:
-    hardware = info.get("hardware")
-    if not isinstance(hardware, Mapping):
-        return []
-    npus = hardware.get("npus")
-    if not isinstance(npus, list):
-        return []
-    return [dict(npu) for npu in npus if isinstance(npu, dict)]
 
 
 def _remove_os_link_fields_for_nvml_gpu_matches(
@@ -159,29 +126,10 @@ def _device_identity_matches(
     return False
 
 
-def _collect_windows_npu_metadata(
-    vendor_id: str | None,
-    device_id: str | None,
-    class_filter: str | None,
-    devices: list[dict[str, object]],
-    filtered_npus: list[dict[str, object]] | None,
-) -> dict[str, object]:
-    if filtered_npus == []:
-        return {}
-    return get_windows_npu_driver_firmware_info(
-        vendor_id=vendor_id,
-        device_id=device_id,
-        class_filter=class_filter,
-        devices=devices,
-    )
+def _collect_mbltml_npu_metadata() -> dict[str, object]:
+    from .device_tracker_npu import _get_mbltml_static_info
 
-
-def _collect_linux_npu_metadata(
-    filtered_npus: list[dict[str, object]] | None,
-) -> dict[str, object]:
-    if filtered_npus == []:
-        return {}
-    return get_linux_npu_driver_firmware_info(npu_devices=filtered_npus)
+    return _get_mbltml_static_info()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -202,18 +150,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write collected static information to a JSON file.",
     )
     collect_parser.add_argument(
-        "--pcie-vendor-id",
-        help="Optional PCIe vendor ID filter, with or without 0x prefix.",
-    )
-    collect_parser.add_argument(
-        "--pcie-device-id",
-        help="Optional PCIe device ID filter, with or without 0x prefix.",
-    )
-    collect_parser.add_argument(
-        "--pcie-class-filter",
-        help="Optional PCIe class prefix filter, e.g. 0x12.",
-    )
-    collect_parser.add_argument(
         "--all-pcie-devices",
         action="store_true",
         help=(
@@ -225,7 +161,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _write_json(info: Mapping[str, object], output: Path | None, stdout: TextIO) -> None:
+def _write_json(
+    info: Mapping[str, object], output: Path | None, stdout: TextIO
+) -> None:
     text = json.dumps(cast(Any, info), indent=2, sort_keys=True) + "\n"
     if output is None:
         stdout.write(text)
@@ -240,9 +178,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "collect":
         info = collect_static_info(
-            pcie_vendor_id=args.pcie_vendor_id,
-            pcie_device_id=args.pcie_device_id,
-            pcie_class_filter=args.pcie_class_filter,
             all_pcie_devices=args.all_pcie_devices,
             sudo_password_provider=None,
         )

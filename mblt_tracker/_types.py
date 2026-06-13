@@ -63,6 +63,7 @@ class OsInfo(TypedDict):
 class NpuDriverInfo(TypedDict):
     aries_version: str | None
     regulus_version: str | None
+    regulus_usb_version: str | None
 
 
 class NpuFirmwareInfo(TypedDict):
@@ -123,9 +124,6 @@ PcieDeviceInfo = TypedDict(
 
 
 class NpuDeviceInfo(PcieDeviceInfo, total=False):
-    board_name: str
-    card_id: int
-    card_model: str
     firmware: NpuFirmwareInfo
 
 

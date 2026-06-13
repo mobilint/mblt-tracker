@@ -894,317 +894,6 @@ def _clean_dram_string(value: object) -> str | None:
     return value
 
 
-def get_linux_npu_driver_firmware_info(
-    npu_devices: list[dict[str, object]] | None = None,
-) -> dict[str, object]:
-    """Collect Linux NPU driver/firmware metadata from mobilint-cli status."""
-    if platform.system() != "Linux":
-        return {}
-    if npu_devices is not None and not npu_devices:
-        return {}
-    status_output = run_command(["mobilint-cli", "status", "-q"])
-    if not status_output:
-        status_output = run_command(["mobilint-cli", "status"])
-    if not status_output:
-        return {}
-    info = parse_mobilint_status_static_info(status_output)
-    if npu_devices is not None:
-        _filter_npu_metadata_to_selected_devices(info, npu_devices)
-    return info
-
-
-def _filter_npu_metadata_to_selected_devices(
-    info: dict[str, object], selected_devices: list[dict[str, object]]
-) -> None:
-    hardware = info.get("hardware")
-    if not isinstance(hardware, dict):
-        return
-    npus = hardware.get("npus")
-    if not isinstance(npus, list):
-        return
-    selected_npus = [
-        metadata
-        for selected_device in selected_devices
-        for metadata in npus
-        if isinstance(metadata, dict)
-        and _npu_metadata_matches_selected_device(metadata, selected_device)
-    ]
-    hardware["npus"] = selected_npus
-
-
-def _npu_metadata_matches_selected_device(
-    metadata: dict[str, object], selected_device: dict[str, object]
-) -> bool:
-    for key in ("dev_no", "bus_address", "pnp_device_id"):
-        metadata_value = metadata.get(key)
-        selected_value = selected_device.get(key)
-        if metadata_value is None or selected_value is None:
-            continue
-        if key == "dev_no":
-            if _to_int(metadata_value) == _to_int(selected_value):
-                return True
-        elif str(metadata_value).lower() == str(selected_value).lower():
-            return True
-    return False
-
-
-def parse_mobilint_status_static_info(status_output: str) -> dict[str, object]:
-    """Parse static NPU fields from ``mobilint-cli status`` output.
-
-    Both the legacy table output and the code-friendly ``status -q`` output are
-    supported. The query output is parsed as an indentation-based dictionary
-    first because its shape is more stable than the human-readable table.
-    """
-    query_info = _parse_mobilint_status_query_static_info(status_output)
-    if query_info:
-        return query_info
-
-    info: dict[str, object] = {}
-    driver_match = re.search(
-        r"Drivers\s*-\s*Aries:\s*([^\s]+)\s+Regulus:\s*([^\s|]+)",
-        status_output,
-    )
-    if driver_match is not None:
-        inference = info.setdefault("inference", {})
-        if isinstance(inference, dict):
-            inference["npu_driver_version"] = driver_match.group(1)
-            inference["driver"] = {
-                "aries_version": driver_match.group(1),
-                "regulus_version": driver_match.group(2),
-            }
-    device_matches = re.findall(
-        r"\|\s*(\d+)\s+([A-Za-z0-9_-]+)\(([^)]+)\).*?\|", status_output
-    )
-    firmware_matches = re.findall(
-        r"\|\s*\d+\s+[0-9]+(?:\.[0-9]+)?\s*C\s+([^\s|]+)", status_output,
-    )
-    if device_matches:
-        devices = []
-        for idx, (device_index, _product, board_name) in enumerate(device_matches):
-            device: dict[str, object] = {
-                "dev_no": int(device_index),
-                "board_name": board_name,
-            }
-            if idx < len(firmware_matches):
-                device["firmware"] = {"version": firmware_matches[idx]}
-            devices.append(device)
-        hardware: dict[str, object] = {}
-        info["hardware"] = hardware
-        hardware["npus"] = devices
-    return info
-
-
-def parse_mobilint_status_query_output(status_output: str) -> dict[str, object]:
-    """Parse ``mobilint-cli status -q`` output into a nested dictionary.
-
-    The query format uses indentation to represent sections and ``Key : Value``
-    pairs for leaves. Device blocks are introduced by paths such as
-    ``/dev/aries0`` and are collected under the top-level ``devices`` list.
-    Values are intentionally kept as strings; consumers can convert units in a
-    context-aware way.
-    """
-    root: dict[str, object] = {}
-    stack: list[tuple[int, dict[str, object]]] = [(-1, root)]
-
-    for raw_line in status_output.splitlines():
-        if not raw_line.strip():
-            continue
-        line = raw_line.expandtabs(4).rstrip()
-        stripped = line.strip()
-        indent = len(line) - len(line.lstrip(" "))
-
-        while stack and indent <= stack[-1][0]:
-            stack.pop()
-        parent = stack[-1][1] if stack else root
-
-        if stripped.startswith("/dev/") and ":" not in stripped:
-            devices = root.setdefault("devices", [])
-            if not isinstance(devices, list):
-                devices = []
-                root["devices"] = devices
-            device: dict[str, object] = {"path": stripped}
-            devices.append(device)
-            stack.append((indent, device))
-            continue
-
-        if ":" in stripped:
-            key, value = stripped.split(":", 1)
-            parent[key.strip()] = value.strip()
-            continue
-
-        section: dict[str, object] = {}
-        parent[stripped] = section
-        stack.append((indent, section))
-
-    return root
-
-
-def parse_mobilint_status_quiet_output(status_output: str) -> dict[str, object]:
-    """Deprecated alias for :func:`parse_mobilint_status_query_output`."""
-    return parse_mobilint_status_query_output(status_output)
-
-
-def _parse_mobilint_status_query_static_info(
-    status_output: str,
-) -> dict[str, object]:
-    parsed = parse_mobilint_status_query_output(status_output)
-    if not parsed.get("devices") and not any(
-        key.startswith("Driver Version") for key in parsed
-    ):
-        return {}
-
-    inference: dict[str, object] = {}
-    aries_version = _parse_mobilint_version_value(
-        _get_str(parsed.get("Driver Version (Aries)"))
-    )
-    regulus_version = _parse_mobilint_version_value(
-        _get_str(parsed.get("Driver Version (Regulus)"))
-    )
-    if aries_version is not None or regulus_version is not None:
-        inference["driver"] = {
-            "aries_version": aries_version,
-            "regulus_version": regulus_version,
-        }
-        if aries_version is not None:
-            inference["npu_driver_version"] = aries_version
-
-    devices = parsed.get("devices")
-    npus: list[dict[str, object]] = []
-    if isinstance(devices, list):
-        for index, raw_device in enumerate(devices):
-            if not isinstance(raw_device, dict):
-                continue
-            device = _mobilint_query_device_to_static_info(raw_device, index)
-            npus.append(device)
-
-    info: dict[str, object] = {}
-    if inference:
-        info["inference"] = inference
-    if npus:
-        info["hardware"] = {"npus": npus}
-    return info
-
-
-def _mobilint_query_device_to_static_info(
-    raw_device: dict[str, object], fallback_index: int
-) -> dict[str, object]:
-    path = _get_str(raw_device.get("path"))
-    dev_no = _parse_device_index(path) if path is not None else None
-    device: dict[str, object] = {
-        "dev_no": dev_no if dev_no is not None else fallback_index
-    }
-    if path is not None:
-        device["board_name"] = os.path.basename(path)
-
-    product = _get_str(raw_device.get("Product"))
-    if product is not None:
-        device["product"] = product
-
-    firmware = raw_device.get("Firmware")
-    if isinstance(firmware, dict):
-        firmware_info: dict[str, object] = {}
-        version_value = _get_str(firmware.get("Version"))
-        version = _parse_mobilint_version_value(version_value)
-        revision = _parse_mobilint_revision_value(version_value)
-        if version is not None:
-            firmware_info["version"] = version
-        if revision is not None:
-            firmware_info["revision"] = revision
-        if firmware_info:
-            device["firmware"] = firmware_info
-
-    pcie = raw_device.get("PCI Express")
-    if isinstance(pcie, dict):
-        mapping = {
-            "Vendor ID": "vendor_id",
-            "Device ID": "device_id",
-            "Sub Vendor ID": "subsystem_vendor_id",
-            "Sub Device ID": "subsystem_device_id",
-            "PCIe Generation": "link_generation",
-            "PCIe Lanes": "lane_width",
-            "PCIe Revision": "revision",
-            "PCIe Class Code": "class",
-        }
-        for source_key, target_key in mapping.items():
-            value = _get_str(pcie.get(source_key))
-            if value is not None:
-                device[target_key] = value
-
-    card_model = _classify_mobilint_query_card_model(raw_device, device)
-    if card_model is not None:
-        device["card_model"] = card_model
-        dev_no_value = _to_int(device.get("dev_no"))
-        device["card_id"] = (
-            _mla400_static_card_id(dev_no_value, fallback_index)
-            if card_model == "MLA400"
-            else device["dev_no"]
-        )
-
-    memory = raw_device.get("Memory")
-    if isinstance(memory, dict):
-        total_mb = _parse_number_from_unit_value(_get_str(memory.get("Total")))
-        if total_mb is not None:
-            device["memory_total_bytes"] = int(total_mb * 1024 * 1024)
-
-    return device
-
-
-def _mla400_static_card_id(dev_no: int | None, fallback_index: int) -> int:
-    """Return the logical MLA400 card id used by runtime metric grouping."""
-    if dev_no is None:
-        return fallback_index // 4
-    return dev_no // 4
-
-
-def _classify_mobilint_query_card_model(
-    raw_device: Mapping[str, object], device: Mapping[str, object]
-) -> str | None:
-    power = raw_device.get("Power")
-    if isinstance(power, Mapping) and "GOLDFINGER" in power:
-        return "MLA400"
-    subsystem_vendor_id = _normalize_hex(str(device.get("subsystem_vendor_id", "")))
-    subsystem_device_id = _normalize_hex(str(device.get("subsystem_device_id", "")))
-    if subsystem_vendor_id in {"402", "0402"} and subsystem_device_id == "108b":
-        return "MLA400"
-    if subsystem_vendor_id in {"401", "0401"} and subsystem_device_id == "1093":
-        return "MLA100"
-    return None
-
-
-def _get_str(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    value = value.strip()
-    return value or None
-
-
-def _parse_mobilint_version_value(value: str | None) -> str | None:
-    if value is None:
-        return None
-    if value.upper() == "N/A":
-        return "N/A"
-    return value.split("(", 1)[0].strip() or None
-
-
-def _parse_mobilint_revision_value(value: str | None) -> str | None:
-    if value is None:
-        return None
-    match = re.search(r"Rev:\s*([^)\s]+)", value)
-    return match.group(1) if match is not None else None
-
-
-def _parse_device_index(path: str) -> int | None:
-    match = re.search(r"(\d+)$", path)
-    return int(match.group(1)) if match is not None else None
-
-
-def _parse_number_from_unit_value(value: str | None) -> float | None:
-    if value is None:
-        return None
-    match = re.search(r"[-+]?\d+(?:\.\d+)?", value)
-    return float(match.group(0)) if match is not None else None
-
-
 def _calculate_theoretical_bandwidth_gbps(
     dimms: Sequence[Mapping[str, object]],
 ) -> float | None:
@@ -1506,6 +1195,7 @@ def get_pcie_static_info(
     include_all_devices: bool = False,
     devices: list[dict[str, object]] | None = None,
     include_private_identifiers: bool = False,
+    include_npus: bool = True,
 ) -> dict[str, object]:
     """Collect best-effort PCIe information.
 
@@ -1545,8 +1235,8 @@ def get_pcie_static_info(
             )
             for dev_no, device in enumerate(gpus)
         ]
-    npus = _find_all_npu_devices(devices, vendor_id, device_id, class_filter)
     inference_info: dict[str, object] = {}
+    npus = _find_all_npu_devices(devices, vendor_id, device_id, class_filter) if include_npus else []
     if npus:
         npu_device_indices = _get_npu_device_indices(devices)
         formatted_npus = [
@@ -1832,8 +1522,8 @@ def get_windows_npu_driver_firmware_info(
 ) -> dict[str, object]:
     """Collect Windows NPU driver metadata from PnP properties.
 
-    This avoids calling ``mobilint-cli``. Driver metadata is exposed by Windows
-    through standard PnP device properties and is normalized to
+    Driver metadata is exposed by Windows through standard PnP device properties
+    and is normalized to
     ``inference.npu_driver_version``.
     """
     if platform.system() != "Windows":
@@ -2161,6 +1851,152 @@ def _format_pcie_device(
         if max_lane_width is not None:
             formatted["max_lane_width"] = max_lane_width
     return formatted
+
+
+_NPU_PCIE_ENRICHMENT_FIELDS = frozenset(
+    {
+        "bus_address",
+        "pnp_device_id",
+        "name",
+        "manufacturer",
+        "status",
+        "driver_date",
+        "driver_description",
+        "driver_provider",
+        "current_link_speed",
+        "current_link_width",
+        "max_link_speed",
+        "max_link_width",
+        "max_link_generation",
+        "max_lane_width",
+    }
+)
+
+
+def enrich_mbltml_npus_with_pcie_info(
+    mbltml_info: dict[str, object],
+    pcie_info: Mapping[str, object],
+) -> None:
+    """Best-effort enrich mbltml-sourced NPU entries with OS PCIe metadata.
+
+    The NPU list and ``dev_no`` namespace remain owned by mbltml. PCIe discovery
+    may only add OS-level descriptive/link fields and must not create, remove, or
+    overwrite mbltml identity/runtime fields.
+    """
+    mbltml_npus = _extract_hardware_device_list(mbltml_info, "npus")
+    pcie_npus = _extract_hardware_device_list(pcie_info, "npus")
+    if not mbltml_npus or not pcie_npus:
+        return
+
+    used_pcie_indices: set[int] = set()
+    for mbltml_index, mbltml_npu in enumerate(mbltml_npus):
+        pcie_index = _find_pcie_enrichment_match(
+            mbltml_npu,
+            pcie_npus,
+            used_pcie_indices,
+            mbltml_index,
+        )
+        if pcie_index is None:
+            continue
+        used_pcie_indices.add(pcie_index)
+        _apply_npu_pcie_enrichment(mbltml_npu, pcie_npus[pcie_index])
+
+
+def _extract_hardware_device_list(
+    info: Mapping[str, object], key: str
+) -> list[dict[str, object]]:
+    hardware = info.get("hardware")
+    if not isinstance(hardware, Mapping):
+        return []
+    devices = hardware.get(key)
+    if not isinstance(devices, list):
+        return []
+    return [device for device in devices if isinstance(device, dict)]
+
+
+def _find_pcie_enrichment_match(
+    mbltml_npu: Mapping[str, object],
+    pcie_npus: list[dict[str, object]],
+    used_pcie_indices: set[int],
+    mbltml_index: int,
+) -> int | None:
+    for pcie_index, pcie_npu in enumerate(pcie_npus):
+        if pcie_index in used_pcie_indices:
+            continue
+        if _device_identity_matches(dict(mbltml_npu), pcie_npu):
+            return pcie_index
+
+    identity_matches = [
+        pcie_index
+        for pcie_index, pcie_npu in enumerate(pcie_npus)
+        if pcie_index not in used_pcie_indices and _pci_identity_matches(mbltml_npu, pcie_npu)
+    ]
+    if len(identity_matches) == 1:
+        return identity_matches[0]
+    if identity_matches:
+        if mbltml_index in identity_matches:
+            return mbltml_index
+        return min(identity_matches)
+
+    if mbltml_index < len(pcie_npus) and mbltml_index not in used_pcie_indices:
+        return mbltml_index
+    return None
+
+
+def _apply_npu_pcie_enrichment(
+    mbltml_npu: dict[str, object], pcie_npu: Mapping[str, object]
+) -> None:
+    for key in _NPU_PCIE_ENRICHMENT_FIELDS:
+        if key in pcie_npu and key not in mbltml_npu:
+            mbltml_npu[key] = pcie_npu[key]
+    if "max_link_generation" not in mbltml_npu and pcie_npu.get("max_link_speed") is not None:
+        max_generation = _link_speed_to_generation(str(pcie_npu["max_link_speed"]))
+        if max_generation is not None:
+            mbltml_npu["max_link_generation"] = max_generation
+    if "max_lane_width" not in mbltml_npu and pcie_npu.get("max_link_width") is not None:
+        max_lane_width = _format_max_lane_width(pcie_npu["max_link_width"])
+        if max_lane_width is not None:
+            mbltml_npu["max_lane_width"] = max_lane_width
+
+
+def _pci_identity_matches(
+    metadata: Mapping[str, object], selected_device: Mapping[str, object]
+) -> bool:
+    required_keys = ("vendor_id", "device_id")
+    if not all(_normalized_identity(metadata.get(key)) for key in required_keys):
+        return False
+    if not all(_normalized_identity(selected_device.get(key)) for key in required_keys):
+        return False
+
+    for key in required_keys:
+        if _normalized_identity(metadata.get(key)) != _normalized_identity(
+            selected_device.get(key)
+        ):
+            return False
+
+    for key in ("subsystem_vendor_id", "subsystem_device_id"):
+        metadata_value = _normalized_identity(metadata.get(key))
+        selected_value = _normalized_identity(selected_device.get(key))
+        if metadata_value is not None and selected_value is not None:
+            if metadata_value != selected_value:
+                return False
+    return True
+
+
+def _normalized_identity(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text.startswith("0x"):
+        try:
+            return f"0x{int(text, 16):x}"
+        except ValueError:
+            return text
+    if all(char in "0123456789abcdef" for char in text):
+        return f"0x{int(text, 16):x}"
+    return text
 
 
 def _sanitize_pcie_device_for_public_output(

@@ -105,14 +105,9 @@ mblt-tracker collect -o static-info.json
 
 # Include all PCIe devices instead of only GPU/NPU-related devices
 mblt-tracker collect --all-pcie-devices
-
-# Filter NPU PCIe discovery by vendor/device/class
-mblt-tracker collect --pcie-vendor-id 0x1ed5
-mblt-tracker collect --pcie-vendor-id 1ed5 --pcie-device-id 0100
-mblt-tracker collect --pcie-class-filter 0x12
 ```
 
-The CLI output is a JSON document containing best-effort host CPU, DRAM, motherboard, OS, GPU, NPU, driver, and PCIe information. For NVIDIA GPU entries, NVML is the source of truth for GPU identity and PCIe link metadata; OS PCIe discovery is used only to attach non-link PCIe identifiers and descriptive fields where available. On Linux, non-NVIDIA PCIe information is read from sysfs. On Windows, non-NVIDIA PCI devices are collected through PowerShell/CIM/PnP queries.
+The CLI output is a JSON document containing best-effort host CPU, DRAM, motherboard, OS, GPU, NPU, driver, and PCIe information. For NVIDIA GPU entries, NVML is the source of truth for GPU identity and PCIe link metadata; OS PCIe discovery is used only to attach non-link PCIe identifiers and descriptive fields where available. For Mobilint NPU entries, `mbltml` is the source of truth for device discovery, `dev_no`, driver, firmware, and device identity; OS PCIe discovery is best-effort enrichment only for link/status/descriptive fields and never creates NPU entries by itself. On Linux, non-NVIDIA PCIe information is read from sysfs. On Windows, non-NVIDIA PCI devices are collected through PowerShell/CIM/PnP queries.
 
 ### Example Output
 
@@ -373,9 +368,6 @@ WARNING:root:imports error
     },
     "npus": [
       {
-        "board_name": "aries0",
-        "card_id": 0,
-        "card_model": "MLA100",
         "class": "0x7800002",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
@@ -394,6 +386,7 @@ WARNING:root:imports error
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
         "name": "Aries",
+        "node_name": "aries0",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x1093",
@@ -477,9 +470,6 @@ Warning: NVML not available. GPU information will not be collected.
     },
     "npus": [
       {
-        "board_name": "aries0",
-        "card_id": 0,
-        "card_model": "MLA400",
         "class": "0x7800002",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
@@ -498,6 +488,7 @@ Warning: NVML not available. GPU information will not be collected.
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
         "name": "MOBILINT NPU Accelerator",
+        "node_name": "aries0",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -505,9 +496,6 @@ Warning: NVML not available. GPU information will not be collected.
         "vendor_id": "0x209F"
       },
       {
-        "board_name": "aries1",
-        "card_id": 0,
-        "card_model": "MLA400",
         "class": "0x7800002",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
@@ -526,6 +514,7 @@ Warning: NVML not available. GPU information will not be collected.
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
         "name": "MOBILINT NPU Accelerator",
+        "node_name": "aries1",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -533,9 +522,6 @@ Warning: NVML not available. GPU information will not be collected.
         "vendor_id": "0x209F"
       },
       {
-        "board_name": "aries2",
-        "card_id": 0,
-        "card_model": "MLA400",
         "class": "0x7800002",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
@@ -554,6 +540,7 @@ Warning: NVML not available. GPU information will not be collected.
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
         "name": "MOBILINT NPU Accelerator",
+        "node_name": "aries2",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -561,9 +548,6 @@ Warning: NVML not available. GPU information will not be collected.
         "vendor_id": "0x209F"
       },
       {
-        "board_name": "aries3",
-        "card_id": 0,
-        "card_model": "MLA400",
         "class": "0x7800002",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
@@ -582,6 +566,7 @@ Warning: NVML not available. GPU information will not be collected.
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
         "name": "MOBILINT NPU Accelerator",
+        "node_name": "aries3",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -626,12 +611,12 @@ Warning: NVML not available. GPU information will not be collected.
 
 | Metric | Intel CPU | Host DRAM | NVIDIA GPU | Mobilint NPU |
 | :--- | :---: | :---: | :---: | :---: |
-| **Power (W)** | ✅ (RAPL) | ✅ (RAPL DRAM) | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Utilization (%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Memory (MB/%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Temperature (C)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mobilint-cli`) |
-| **Static Info** | ✅ Host/OS/DRAM/Motherboard | ✅ Host/OS/DRAM/Motherboard | ✅ NVML + PCIe | ✅ PCIe + `mobilint-cli` |
-| **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (Logical NPU Cards) |
+| **Power (W)** | ✅ (RAPL) | ✅ (RAPL DRAM) | ✅ (NVML) | ✅ (`mbltml`) |
+| **Utilization (%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
+| **Memory (MB/%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
+| **Temperature (C)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
+| **Static Info** | ✅ Host/OS/DRAM/Motherboard | ✅ Host/OS/DRAM/Motherboard | ✅ NVML + PCIe | ✅ `mbltml` + PCIe enrichment |
+| **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (`mbltml` Device Indices) |
 
 ---
 
@@ -675,22 +660,21 @@ Uses the **Intel RAPL DRAM domain** through `pyRAPL` for host DRAM power measure
 
 ### Mobilint NPU
 
-Polls the `mobilint-cli status -q` command, with a legacy JSON fallback for older environments.
+Uses **mbltml** for OS-independent Mobilint NPU telemetry on Linux and Windows.
 
-- **Platform**: Currently supports **Linux only**.
-- **Requirement**: Ensure [Mobilint Utility Tool](https://docs.mobilint.com/v1.0/en/installing_utility.html) is installed and `mobilint-cli` is in your PATH.
-- **Device Selection**: Tracks all logical NPU cards by default, or selected logical card IDs with `NPUDeviceTracker(npu_id=0)` / `NPUDeviceTracker(npu_id=[0, 1])`.
-- **MLA100 vs MLA400**: `status -q` output is classified best-effort. Devices with a `Power.GOLDFINGER` rail are treated as MLA400 and grouped as one logical card. MLA100 devices remain one logical card per PCIe card. PCIe subsystem IDs are also used as a fallback (`0x401/0x1093` for MLA100, `0x402/0x108B` for MLA400 observed outputs).
-- **NPU Power**: Distinguishes between NPU core power and total card/system power. For MLA400, `Power.Total` is reported by the first chip, while NPU core, memory, and utilization are aggregated across the grouped Aries chips.
-- **DDR/PMIC/GOLDFINGER Power**: Parses optional NPU board DDR, PMIC, and MLA400 GOLDFINGER power rails when present.
-- **Temperature**: Parses NPU temperature from `mobilint-cli status` output when available.
-- **Static Info**: Reports Mobilint PCIe device information and parses driver, firmware, product, board, `card_model`, and `card_id` metadata from `mobilint-cli status` when available.
+- **Platform**: Supports Linux and Windows when the Mobilint driver and `mbltml` runtime library are available.
+- **Device Selection**: Tracks all detected physical `mbltml` device indices by default, or selected indices with `NPUDeviceTracker(npu_id=0)` / `NPUDeviceTracker(npu_id=[0, 1])`.
+- **Default Rail Policy**: The default `rail_metrics="npu"` mode reads total device power, NPU rail power/current/voltage, total utilization, memory usage, and temperature without changing the firmware rail selection register. This keeps the default monitoring path low-latency.
+- **Shared Rail Register Limitation**: NPU, DDR, PMIC, and GoldFinger rail power/current/voltage readings share the same firmware register mapping. The register initially points to the NPU rail. Reading non-NPU rails requires changing the selected rail with `mbltmlSetExtraPmicID()`, and firmware may take up to about 1 second to refresh the register value.
+- **Extra Rail Monitoring**: Set `rail_metrics="all"` or a list such as `rail_metrics=["npu", "ddr"]` to opt into DDR/PMIC/GoldFinger rail telemetry. Extra rails are sampled by a non-blocking state machine, so their effective sampling rate can be lower than `interval`; samples are recorded only after the firmware refresh delay has elapsed.
+- **Metric Naming**: Rail-specific measurements use explicit names such as `avg_npu_rail_power_w`, `avg_ddr_rail_current_a`, and `avg_goldfinger_rail_voltage_v` to distinguish PMIC rail telemetry from total device power.
+- **Static Info**: Uses `mbltml` as the NPU source of truth for device discovery, `dev_no`, driver, firmware, device type, hardware version, and memory metadata. OS PCIe discovery may enrich NPU entries with link speed/width, status, and descriptive fields, but it is never used as a fallback NPU discovery path.
 
 ---
 
 ## 📝 Metric Output Format
 
-Calling `get_metric()` returns a dictionary with standardized cross-device keys where applicable. Missing or unavailable measurements are returned as `None`.
+Calling `get_metric()` returns a dictionary with standardized cross-device keys where applicable. Missing or unavailable measurements are returned as `None`. Trackers may also include device-specific aliases or detailed telemetry keys; for example, NPU total telemetry keeps explicit `total_*` / `memory_usage_*` names while also exposing the standardized keys below for compatibility with CPU/GPU consumers.
 
 ```json
 {
@@ -710,8 +694,7 @@ Calling `get_metric()` returns a dictionary with standardized cross-device keys 
   "avg_temperature_c": 72.3,
   "p99_temperature_c": 79.0,
   "max_temperature_c": 80.0,
-  "samples": 100,
-  "util_samples": 101
+  "samples": 100
 }
 ```
 
@@ -720,7 +703,7 @@ Tracker-specific fields may also be present:
 - **CPU**: `cpu` contains per-socket statistics keyed by socket ID.
 - **GPU**: `gpu` contains per-GPU statistics keyed by GPU index. GPU-specific summary keys include `avg_gpu_util_pct`, `p99_gpu_util_pct`, `max_gpu_util_pct`, `avg_mem_util_pct`, and `p99_mem_util_pct`.
 - **DRAM**: DRAM-specific power keys include `avg_dram_power_w`, `p99_dram_power_w`, and `max_dram_power_w`. `dram` contains per-socket statistics keyed by socket ID.
-- **NPU**: NPU-specific power keys include `avg_npu_power_w`, `p99_npu_power_w`, `max_npu_power_w`, `avg_ddr_power_w`, `p99_ddr_power_w`, `max_ddr_power_w`, `avg_pmic_power_w`, `p99_pmic_power_w`, `max_pmic_power_w`, `avg_goldfinger_power_w`, `p99_goldfinger_power_w`, `max_goldfinger_power_w`, `avg_total_power_w`, `p99_total_power_w`, and `max_total_power_w`. `avg_power_w` is mapped to total power for cross-device consistency. `npu` contains per logical card statistics keyed by card ID.
+- **NPU**: NPU-specific keys include total device telemetry (`avg_total_power_w`, `avg_total_current_a`, `avg_total_voltage_v`), utilization (`avg_total_utilization_pct`), memory (`avg_memory_usage_mb`, `memory_total_mb`, `avg_memory_usage_pct`), temperature, and rail-specific telemetry (`avg_npu_rail_power_w`, `avg_ddr_rail_power_w`, `avg_pmic_rail_power_w`, `avg_goldfinger_rail_power_w`, plus matching current/voltage keys when available). For compatibility with CPU/GPU consumers, NPU total telemetry is also exposed through standardized aliases such as `avg_power_w`, `avg_utilization_pct`, `avg_memory_used_mb`, and `total_memory_mb`. `devices` contains per-`mbltml` device statistics keyed by device index. `rail_metrics` documents the selected rails and the 1-second firmware refresh limitation for extra rails.
 
 ### Time-Series Trace APIs
 
@@ -735,10 +718,10 @@ tracker.get_temp_trace()  # Temperature trace: list[(timestamp, temperature_c)]
 NPU trackers additionally expose rail-specific power traces:
 
 ```python
-tracker.get_npu_power_trace()         # NPU core power
-tracker.get_ddr_power_trace()         # On-board NPU DDR power, when available
-tracker.get_pmic_power_trace()        # NPU PMIC power, when available
-tracker.get_goldfinger_power_trace()  # MLA400 GOLDFINGER input power, when available
+tracker.get_npu_rail_power_trace()         # NPU rail power
+tracker.get_ddr_rail_power_trace()         # DDR rail power, when enabled
+tracker.get_pmic_rail_power_trace()        # PMIC rail power, when enabled
+tracker.get_goldfinger_rail_power_trace()  # GoldFinger rail power, when enabled
 ```
 
 ---
@@ -766,19 +749,17 @@ Typical fields include:
 - `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
 - `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names
 - `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices. For NVIDIA GPUs, current and maximum PCIe link generation/width fields are sourced from NVML; OS PCIe discovery may add non-link fields such as vendor/device IDs and descriptive metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
-- `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, current/maximum link information, and firmware metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
-- `hardware.npus[].card_model`: best-effort Mobilint card model classification such as `MLA100` or `MLA400` when `mobilint-cli status -q` exposes enough information
-- `hardware.npus[].card_id`: logical NPU card ID used by `NPUDeviceTracker(npu_id=...)`; MLA400 Aries chips share the same card ID
+- `hardware.npus`: Mobilint NPU devices discovered through `mbltml`. The `dev_no` field is the physical `mbltml` runtime device index, and entries may include vendor/device IDs, node name, device type, hardware version, memory metadata, firmware metadata, and PCIe link/status/descriptive enrichment where available. OS PCIe discovery never creates NPU entries by itself. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
 - `inference.gpu`: NVIDIA driver and CUDA driver versions. The CLI normalizes the CUDA driver version as a string such as `"13.0"`; `GPUDeviceTracker.get_static_info()` returns the raw NVML CUDA driver integer.
-- `hardware.npus[].firmware`: per-NPU firmware metadata where available. Linux currently maps `mobilint-cli status` firmware rows by device order.
-- `inference.npu_driver_version`: host Mobilint NPU driver version when available. Linux may also include `inference.driver` with Aries/Regulus driver metadata parsed from `mobilint-cli status`.
+- `hardware.npus[].firmware`: per-NPU firmware metadata where available. Firmware metadata is collected through `mbltml` when available.
+- `inference.npu_driver_version`: host Mobilint NPU driver version when available. Driver metadata is collected through `mbltml` when available.
 
 PCIe discovery supports:
 
 - **Linux**: `/sys/bus/pci/devices`
 - **Windows**: PowerShell/CIM/PnP PCI device queries
 
-For tests or custom environments, `MBLT_TRACKER_PCI_SYSFS` can override the Linux PCI sysfs root. `NPUDeviceTracker.get_static_info()` can customize NPU PCIe matching with `MBLT_TRACKER_NPU_PCI_VENDOR_ID`, `MBLT_TRACKER_NPU_PCI_DEVICE_ID`, and `MBLT_TRACKER_NPU_PCI_CLASS_FILTER`. The `mblt-tracker collect` CLI uses the corresponding `--pcie-vendor-id`, `--pcie-device-id`, and `--pcie-class-filter` flags.
+For tests or custom environments, `MBLT_TRACKER_PCI_SYSFS` can override the Linux PCI sysfs root. NPU discovery and selection are always based on `mbltml`; PCIe discovery is used only for best-effort enrichment and raw PCIe reporting.
 
 ---
 
