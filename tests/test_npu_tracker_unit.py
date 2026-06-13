@@ -236,6 +236,55 @@ def test_extra_rail_samples_wait_for_firmware_refresh(fake_mbltml, monkeypatch):
     assert tracker.get_metric()["ddr_rail_power_w_samples"] == 1
 
 
+def test_failed_extra_rail_selection_does_not_leave_pending_state(
+    fake_mbltml, monkeypatch
+):
+    now = 100.0
+    original_set_extra_pmic_id = fake_mbltml.mbltmlSetExtraPmicID
+
+    def fail_ddr_on_second_device(dev_no, rail_id):
+        if dev_no == 1 and rail_id == fake_mbltml.MBLTML_EXTRA_PMIC_ID_DDR:
+            raise RuntimeError("unsupported rail")
+        original_set_extra_pmic_id(dev_no, rail_id)
+
+    monkeypatch.setattr(fake_mbltml, "mbltmlSetExtraPmicID", fail_ddr_on_second_device)
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker = NPUDeviceTracker(interval=0.1, rail_metrics=["npu", "ddr"])
+
+    tracker._func_for_sched()
+    assert tracker._pending_extra_rail is None
+    assert tracker.get_ddr_rail_power_trace() == []
+    assert tracker.get_npu_rail_power_trace() == [(100.0, 3.0)]
+
+    now = 101.1
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker._func_for_sched()
+
+    assert tracker._pending_extra_rail is None
+    assert fake_mbltml.set_calls.count((0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_DDR)) == 2
+    assert tracker.get_ddr_rail_power_trace() == []
+    assert tracker.get_npu_rail_power_trace()[-1] == (101.1, 3.0)
+
+
+def test_missing_extra_rail_constant_does_not_crash(monkeypatch):
+    class MissingDdrMbltml(FakeMbltml):
+        def __getattribute__(self, name):
+            if name == "MBLTML_EXTRA_PMIC_ID_DDR":
+                raise AttributeError(name)
+            return super().__getattribute__(name)
+
+    fake = MissingDdrMbltml()
+    monkeypatch.setattr(npu_module, "mbltml", fake)
+    monkeypatch.setattr(npu_module.time, "time", lambda: 100.0)
+    tracker = NPUDeviceTracker(interval=0.1, rail_metrics="all")
+
+    tracker._func_for_sched()
+
+    assert tracker._pending_extra_rail is None
+    assert tracker.get_ddr_rail_power_trace() == []
+    assert tracker.get_npu_rail_power_trace() == [(100.0, 5.0)]
+
+
 def test_multiple_extra_rails_wait_before_advancing(fake_mbltml, monkeypatch):
     now = 100.0
     monkeypatch.setattr(npu_module.time, "time", lambda: now)

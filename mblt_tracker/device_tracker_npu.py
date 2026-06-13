@@ -108,10 +108,12 @@ class NPUDeviceTracker(BaseDeviceTracker):
         selected_devices = self._selected_device_indices()
         if self._pending_extra_rail is None:
             rail = extra_rails[self._next_extra_rail_index % len(extra_rails)]
-            self._select_extra_rail_for_devices(rail, selected_devices, now)
-            self._pending_extra_rail = rail
+            if self._select_extra_rail_for_devices(rail, selected_devices, now):
+                self._pending_extra_rail = rail
 
         rail = self._pending_extra_rail
+        if rail is None:
+            return None
         if all(
             self._selected_rail.get(dev_no) == rail
             and now - self._rail_selected_at.get(dev_no, 0.0)
@@ -123,12 +125,16 @@ class NPUDeviceTracker(BaseDeviceTracker):
 
     def _select_extra_rail_for_devices(
         self, rail: str, selected_devices: list[int], now: float
-    ) -> None:
+    ) -> bool:
+        all_selected = True
         for dev_no in selected_devices:
             if self._selected_rail.get(dev_no) != rail:
                 if _set_extra_rail(dev_no, rail):
                     self._selected_rail[dev_no] = rail
                     self._rail_selected_at[dev_no] = now
+                else:
+                    all_selected = False
+        return all_selected
 
     def _complete_extra_rail_sample(self, rail: str) -> None:
         if self._pending_extra_rail != rail:
@@ -398,8 +404,8 @@ def _normalize_rail_metrics(rail_metrics: str | Iterable[str]) -> tuple[str, ...
 
 
 def _set_extra_rail(dev_no: int, rail: str) -> bool:
-    rail_id = getattr(mbltml, f"MBLTML_EXTRA_PMIC_ID_{rail.upper()}")
     try:
+        rail_id = getattr(mbltml, f"MBLTML_EXTRA_PMIC_ID_{rail.upper()}")
         mbltml.mbltmlSetExtraPmicID(dev_no, rail_id)
     except Exception as exc:
         _LOGGER.debug("Unable to select %s rail for NPU %s: %s", rail, dev_no, exc)
