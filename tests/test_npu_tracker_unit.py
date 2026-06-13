@@ -366,6 +366,83 @@ def test_get_static_info_merges_mbltml_metadata(fake_mbltml, monkeypatch):
     }
 
 
+def test_get_static_info_enriches_mbltml_npus_with_pcie_metadata(
+    fake_mbltml, monkeypatch
+) -> None:
+    monkeypatch.setattr(npu_module, "get_all_pcie_devices", lambda: [])
+    monkeypatch.setattr(
+        npu_module,
+        "get_pcie_static_info",
+        lambda **kwargs: {
+            "hardware": {
+                "npus": [
+                    {
+                        "dev_no": 0,
+                        "vendor_id": "0x1ed5",
+                        "device_id": "0x0100",
+                        "current_link_speed": "16.0 GT/s PCIe",
+                        "current_link_width": "8",
+                        "max_link_speed": "16.0 GT/s PCIe",
+                        "max_link_width": "8",
+                        "status": "OK",
+                    }
+                ]
+            }
+        },
+    )
+
+    tracker = NPUDeviceTracker(npu_id=0)
+    npu = tracker.get_static_info()["hardware"]["npus"][0]
+
+    assert npu["vendor_id"] == "0x209f"
+    assert npu["device_id"] == "0x0"
+    assert npu["current_link_speed"] == "16.0 GT/s PCIe"
+    assert npu["current_link_width"] == "8"
+    assert npu["max_link_speed"] == "16.0 GT/s PCIe"
+    assert npu["max_link_width"] == "8"
+    assert npu["max_link_generation"] == "Gen4"
+    assert npu["max_lane_width"] == "x8"
+    assert npu["status"] == "OK"
+
+
+def test_get_static_info_enriches_before_selected_npu_filter(
+    fake_mbltml, monkeypatch
+) -> None:
+    monkeypatch.setattr(npu_module, "get_all_pcie_devices", lambda: [])
+    monkeypatch.setattr(
+        npu_module,
+        "get_pcie_static_info",
+        lambda **kwargs: {
+            "hardware": {
+                "npus": [
+                    {
+                        "dev_no": 0,
+                        "vendor_id": "0x209f",
+                        "device_id": "0x0",
+                        "current_link_speed": "8.0 GT/s PCIe",
+                        "current_link_width": "4",
+                    },
+                    {
+                        "dev_no": 1,
+                        "vendor_id": "0x209f",
+                        "device_id": "0x0",
+                        "current_link_speed": "16.0 GT/s PCIe",
+                        "current_link_width": "8",
+                    },
+                ]
+            }
+        },
+    )
+
+    tracker = NPUDeviceTracker(npu_id=1)
+    npu = tracker.get_static_info()["hardware"]["npus"][0]
+
+    assert npu["dev_no"] == 1
+    assert npu["node_name"] == "aries1"
+    assert npu["current_link_speed"] == "16.0 GT/s PCIe"
+    assert npu["current_link_width"] == "8"
+
+
 def test_get_static_info_limits_mbltml_metadata_to_selected_npu(
     fake_mbltml, monkeypatch
 ) -> None:
@@ -396,54 +473,7 @@ def test_get_static_info_limits_mbltml_metadata_to_selected_npu(
     ]
 
 
-def test_get_static_info_limits_mbltml_metadata_to_filtered_pcie_npus(
-    fake_mbltml, monkeypatch
-) -> None:
-    monkeypatch.setenv("MBLT_TRACKER_NPU_PCI_VENDOR_ID", "209f")
-    monkeypatch.setattr(npu_module, "get_all_pcie_devices", lambda: [])
-    monkeypatch.setattr(
-        npu_module,
-        "get_pcie_static_info",
-        lambda **kwargs: {
-            "hardware": {
-                "npus": [
-                    {
-                        "dev_no": 0,
-                        "vendor_id": "0x209f",
-                        "device_id": "0x0",
-                        "subsystem_vendor_id": "0x402",
-                        "subsystem_device_id": "0x108b",
-                    }
-                ]
-            }
-        },
-    )
-
-    tracker = NPUDeviceTracker()
-
-    info = tracker.get_static_info()
-
-    assert info["hardware"]["npus"] == [
-        {
-            "dev_no": 0,
-            "vendor_id": "0x209f",
-            "device_id": "0x0",
-            "subsystem_vendor_id": "0x402",
-            "subsystem_device_id": "0x108b",
-            "node_name": "aries0",
-            "device_type": "Aries",
-            "hardware_version": "Aries2",
-            "firmware": {"version": "2.0.1", "revision": "7"},
-            "link_generation": 4,
-            "lane_width": 8,
-            "revision": "0x2",
-            "class": "0x7800002",
-            "memory_total_bytes": 1073741824,
-        }
-    ]
-
-
-def test_get_static_info_skips_mbltml_metadata_when_pcie_filter_matches_no_npus(
+def test_get_static_info_ignores_legacy_pcie_filter_env_vars(
     fake_mbltml, monkeypatch
 ) -> None:
     monkeypatch.setenv("MBLT_TRACKER_NPU_PCI_VENDOR_ID", "209f")
@@ -452,4 +482,6 @@ def test_get_static_info_skips_mbltml_metadata_when_pcie_filter_matches_no_npus(
 
     tracker = NPUDeviceTracker()
 
-    assert tracker.get_static_info() == {}
+    info = tracker.get_static_info()
+
+    assert [npu["dev_no"] for npu in info["hardware"]["npus"]] == [0, 1]

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from typing import Any
 
 import mbltml
@@ -11,8 +10,8 @@ import numpy as np
 
 from .device_tracker import BaseDeviceTracker
 from .static_info import (
-    _deep_merge,
     _sanitize_static_info_for_public_output,
+    enrich_mbltml_npus_with_pcie_info,
     get_all_pcie_devices,
     get_pcie_static_info,
 )
@@ -304,33 +303,19 @@ class NPUDeviceTracker(BaseDeviceTracker):
         return self.get_goldfinger_rail_power_trace()
 
     def get_static_info(self) -> dict[str, object]:
-        pcie_vendor_id = os.environ.get("MBLT_TRACKER_NPU_PCI_VENDOR_ID")
-        pcie_device_id = os.environ.get("MBLT_TRACKER_NPU_PCI_DEVICE_ID")
-        pcie_class_filter = os.environ.get("MBLT_TRACKER_NPU_PCI_CLASS_FILTER")
         pcie_devices = get_all_pcie_devices()
-        info = get_pcie_static_info(
-            vendor_id=pcie_vendor_id,
-            device_id=pcie_device_id,
-            class_filter=pcie_class_filter,
+        pcie_info = get_pcie_static_info(
             devices=pcie_devices,
             include_private_identifiers=True,
-        )
-        filtered_pcie_npus = (
-            _extract_static_info_npus(info)
-            if _has_pcie_filter(pcie_vendor_id, pcie_device_id, pcie_class_filter)
-            else None
+            include_npus=True,
         )
         mbltml_info = _get_mbltml_static_info()
+        enrich_mbltml_npus_with_pcie_info(mbltml_info, pcie_info)
         _filter_static_info_to_device_indices(
             mbltml_info,
             set(self._selected_device_indices()),
         )
-        if filtered_pcie_npus is not None:
-            if not filtered_pcie_npus:
-                return _sanitize_static_info_for_public_output(info)
-            _filter_static_info_to_selected_pcie_devices(mbltml_info, filtered_pcie_npus)
-        _deep_merge(info, mbltml_info)
-        return _sanitize_static_info_for_public_output(info)
+        return _sanitize_static_info_for_public_output(mbltml_info)
 
     def reset(self) -> None:
         metric_keys = [
@@ -569,100 +554,6 @@ def _filter_static_info_to_device_indices(
         for npu in npus
         if isinstance(npu, dict) and npu.get("dev_no") in selected_indices
     ]
-
-
-def _has_pcie_filter(
-    vendor_id: str | None, device_id: str | None, class_filter: str | None
-) -> bool:
-    return any(value is not None for value in (vendor_id, device_id, class_filter))
-
-
-def _extract_static_info_npus(info: Mapping[str, object]) -> list[dict[str, object]]:
-    hardware = info.get("hardware")
-    if not isinstance(hardware, Mapping):
-        return []
-    npus = hardware.get("npus")
-    if not isinstance(npus, list):
-        return []
-    return [dict(npu) for npu in npus if isinstance(npu, dict)]
-
-
-def _filter_static_info_to_selected_pcie_devices(
-    info: dict[str, object], selected_devices: list[dict[str, object]]
-) -> None:
-    hardware = info.get("hardware")
-    if not isinstance(hardware, dict):
-        return
-    npus = hardware.get("npus")
-    if not isinstance(npus, list):
-        return
-    selected = []
-    for metadata in npus:
-        if not isinstance(metadata, dict):
-            continue
-        if any(
-            _npu_static_metadata_matches_selected_device(metadata, selected_device)
-            for selected_device in selected_devices
-        ):
-            selected.append(metadata)
-    hardware["npus"] = selected
-
-
-def _npu_static_metadata_matches_selected_device(
-    metadata: Mapping[str, object], selected_device: Mapping[str, object]
-) -> bool:
-    metadata_dev_no = metadata.get("dev_no")
-    selected_dev_no = selected_device.get("dev_no")
-    if metadata_dev_no is not None and selected_dev_no is not None:
-        return metadata_dev_no == selected_dev_no
-
-    for key in ("bus_address", "pnp_device_id"):
-        metadata_value = metadata.get(key)
-        selected_value = selected_device.get(key)
-        if metadata_value is not None and selected_value is not None:
-            return str(metadata_value).lower() == str(selected_value).lower()
-
-    return _pci_identity_matches(metadata, selected_device)
-
-
-def _pci_identity_matches(
-    metadata: Mapping[str, object], selected_device: Mapping[str, object]
-) -> bool:
-    required_keys = ("vendor_id", "device_id")
-    if not all(_normalized_identity(metadata.get(key)) for key in required_keys):
-        return False
-    if not all(_normalized_identity(selected_device.get(key)) for key in required_keys):
-        return False
-
-    for key in required_keys:
-        if _normalized_identity(metadata.get(key)) != _normalized_identity(
-            selected_device.get(key)
-        ):
-            return False
-
-    for key in ("subsystem_vendor_id", "subsystem_device_id"):
-        metadata_value = _normalized_identity(metadata.get(key))
-        selected_value = _normalized_identity(selected_device.get(key))
-        if metadata_value is not None and selected_value is not None:
-            if metadata_value != selected_value:
-                return False
-    return True
-
-
-def _normalized_identity(value: object) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip().lower()
-    if not text:
-        return None
-    if text.startswith("0x"):
-        try:
-            return f"0x{int(text, 16):x}"
-        except ValueError:
-            return text
-    if all(char in "0123456789abcdef" for char in text):
-        return f"0x{int(text, 16):x}"
-    return text
 
 
 def _get_mbltml_device_static_info(dev_no: int) -> dict[str, object]:

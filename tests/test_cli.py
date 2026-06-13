@@ -11,9 +11,6 @@ from mblt_tracker import cli
 def test_collect_prints_static_info_as_json(monkeypatch, capsys) -> None:
     def fake_collect_static_info(**kwargs):
         assert kwargs == {
-            "pcie_vendor_id": None,
-            "pcie_device_id": None,
-            "pcie_class_filter": None,
             "all_pcie_devices": False,
             "sudo_password_provider": None,
         }
@@ -34,9 +31,6 @@ def test_collect_writes_static_info_to_output_file(
 ) -> None:
     def fake_collect_static_info(**kwargs):
         assert kwargs == {
-            "pcie_vendor_id": "1ed5",
-            "pcie_device_id": "0100",
-            "pcie_class_filter": "0x12",
             "all_pcie_devices": True,
             "sudo_password_provider": None,
         }
@@ -50,12 +44,6 @@ def test_collect_writes_static_info_to_output_file(
             "collect",
             "--output",
             str(output),
-            "--pcie-vendor-id",
-            "1ed5",
-            "--pcie-device-id",
-            "0100",
-            "--pcie-class-filter",
-            "0x12",
             "--all-pcie-devices",
         ]
     )
@@ -70,9 +58,6 @@ def test_collect_writes_static_info_to_output_file(
 def test_collect_never_creates_sudo_prompt_provider(monkeypatch, capsys) -> None:
     def fake_collect_static_info(**kwargs):
         assert kwargs == {
-            "pcie_vendor_id": None,
-            "pcie_device_id": None,
-            "pcie_class_filter": None,
             "all_pcie_devices": False,
             "sudo_password_provider": None,
         }
@@ -99,7 +84,7 @@ def test_collect_static_info_merges_mbltml_npu_driver_metadata(monkeypatch) -> N
     monkeypatch.setattr(
         cli,
         "get_pcie_static_info",
-        lambda **_kwargs: {"hardware": {"npus": [{"vendor_id": "0x209f"}]}},
+        lambda **_kwargs: {},
     )
     monkeypatch.setattr(
         cli,
@@ -129,7 +114,7 @@ def test_collect_mbltml_npu_metadata_import_errors_are_not_suppressed(
     monkeypatch.setitem(sys.modules, "mblt_tracker.device_tracker_npu", None)
 
     with pytest.raises(ModuleNotFoundError):
-        cli._collect_mbltml_npu_metadata(filtered_npus=None)
+        cli._collect_mbltml_npu_metadata()
 
 
 def test_collect_static_info_merges_mbltml_npu_firmware_metadata(
@@ -145,7 +130,7 @@ def test_collect_static_info_merges_mbltml_npu_firmware_metadata(
     monkeypatch.setattr(
         cli,
         "get_pcie_static_info",
-        lambda **_kwargs: {"hardware": {"npus": [{"vendor_id": "0x209f"}]}},
+        lambda **_kwargs: {},
     )
     monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
     monkeypatch.setattr(cli, "get_nvml_gpu_static_info", lambda **_kwargs: {})
@@ -164,7 +149,7 @@ def test_collect_static_info_merges_mbltml_npu_firmware_metadata(
         "hardware": {
             "cpu": {"architecture": "x86_64"},
             "npus": [
-                {"vendor_id": "0x209f", "dev_no": 0, "firmware": {"version": "1.2.4"}}
+                {"dev_no": 0, "firmware": {"version": "1.2.4"}}
             ],
         },
         "inference": {"npu_driver_version": "1.12.0"},
@@ -251,15 +236,21 @@ def test_collect_static_info_removes_os_link_fields_for_nvml_gpu_match(
     }
 
 
-def test_collect_static_info_passes_pcie_filters_to_mbltml_npu_metadata(
+def test_collect_static_info_enriches_mbltml_npus_with_pcie_metadata(
     monkeypatch,
 ) -> None:
     pcie_devices = [
-        {"vendor_id": "0x1ed5", "device_id": "0x0100", "class": "0x120000"},
-        {"vendor_id": "0x209f", "device_id": "0x0000", "class": "0x120000"},
+        {
+            "vendor_id": "0x209f",
+            "device_id": "0x0000",
+            "class": "0x120000",
+            "current_link_speed": "16.0 GT/s PCIe",
+            "current_link_width": "8",
+            "max_link_speed": "16.0 GT/s PCIe",
+            "max_link_width": "8",
+            "status": "OK",
+        },
     ]
-    pcie_info = {"hardware": {"npus": [{"dev_no": 0, "vendor_id": "0x1ed5"}]}}
-    calls: dict[str, object] = {}
 
     monkeypatch.setattr(
         cli,
@@ -269,88 +260,41 @@ def test_collect_static_info_passes_pcie_filters_to_mbltml_npu_metadata(
         },
     )
     monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: pcie_devices)
-    monkeypatch.setattr(cli, "get_pcie_static_info", lambda **_kwargs: pcie_info)
-    monkeypatch.setattr(cli, "get_nvml_gpu_static_info", lambda **_kwargs: {})
-
-    def fake_mbltml_metadata(**kwargs):
-        calls.update(kwargs)
-        return {}
-
-    monkeypatch.setattr(cli, "_collect_mbltml_npu_metadata", fake_mbltml_metadata)
-
-    cli.collect_static_info(
-        pcie_vendor_id="1ed5",
-        pcie_device_id="0100",
-        pcie_class_filter="0x12",
-    )
-
-    assert calls == {"filtered_npus": [{"dev_no": 0, "vendor_id": "0x1ed5"}]}
-
-
-def test_filter_npu_metadata_requires_more_than_vendor_id() -> None:
-    info = {
-        "hardware": {
-            "npus": [
-                {"vendor_id": "0x209f", "device_id": "0x0"},
-                {"vendor_id": "0x209f", "device_id": "0x1"},
-            ]
-        }
-    }
-
-    cli._filter_npu_metadata_to_selected_devices(
-        info,
-        [{"vendor_id": "0x209f"}],
-    )
-
-    assert info == {"hardware": {"npus": []}}
-
-
-def test_filter_npu_metadata_matches_vendor_and_device_id() -> None:
-    info = {
-        "hardware": {
-            "npus": [
-                {"vendor_id": "0x209f", "device_id": "0x0"},
-                {"vendor_id": "0x209f", "device_id": "0x1"},
-            ]
-        }
-    }
-
-    cli._filter_npu_metadata_to_selected_devices(
-        info,
-        [{"vendor_id": "209f", "device_id": "0001"}],
-    )
-
-    assert info == {"hardware": {"npus": [{"vendor_id": "0x209f", "device_id": "0x1"}]}}
-
-
-def test_collect_static_info_does_not_limit_npu_metadata_without_pcie_filter(
-    monkeypatch,
-) -> None:
-    calls: dict[str, object] = {}
-
     monkeypatch.setattr(
         cli,
-        "get_host_static_info",
-        lambda sudo_password=None, sudo_password_provider=None, pcie_devices=None: {
-            "hardware": {}
-        },
+        "get_pcie_static_info",
+        lambda **kwargs: {
+            "hardware": {"npus": [pcie_devices[0]]}
+        }
+        if kwargs.get("include_npus")
+        else {},
     )
-    monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
-    monkeypatch.setattr(cli, "get_pcie_static_info", lambda **_kwargs: {})
     monkeypatch.setattr(cli, "get_nvml_gpu_static_info", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        cli,
+        "_collect_mbltml_npu_metadata",
+        lambda: {"hardware": {"npus": [{"dev_no": 0, "vendor_id": "0x209f", "device_id": "0x0"}]}},
+    )
 
-    def fake_mbltml_metadata(**kwargs):
-        calls.update(kwargs)
-        return {}
+    info = cli.collect_static_info()
 
-    monkeypatch.setattr(cli, "_collect_mbltml_npu_metadata", fake_mbltml_metadata)
+    assert info["hardware"]["npus"] == [
+        {
+            "dev_no": 0,
+            "vendor_id": "0x209f",
+            "device_id": "0x0",
+            "current_link_speed": "16.0 GT/s PCIe",
+            "current_link_width": "8",
+            "max_link_speed": "16.0 GT/s PCIe",
+            "max_link_width": "8",
+            "max_link_generation": "Gen4",
+            "max_lane_width": "x8",
+            "status": "OK",
+        }
+    ]
 
-    cli.collect_static_info()
 
-    assert calls == {"filtered_npus": None}
-
-
-def test_collect_static_info_skips_mbltml_npu_metadata_when_filter_matches_no_npus(
+def test_collect_static_info_always_collects_mbltml_npu_metadata(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -366,12 +310,119 @@ def test_collect_static_info_skips_mbltml_npu_metadata_when_filter_matches_no_np
     monkeypatch.setattr(
         cli,
         "_collect_mbltml_npu_metadata",
-        lambda **_kwargs: {
-            "hardware": {"npus": [{"dev_no": 0, "firmware": {"version": "1.2.4"}}]},
-            "inference": {"npu_driver_version": "1.12.0"},
+        lambda: {"hardware": {"npus": [{"dev_no": 0}]}},
+    )
+
+    info = cli.collect_static_info()
+
+    assert info == {"hardware": {"npus": [{"dev_no": 0}]}}
+
+
+def test_collect_static_info_does_not_create_npus_from_pcie_only(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "get_host_static_info",
+        lambda sudo_password=None, sudo_password_provider=None, pcie_devices=None: {
+            "hardware": {}
+        },
+    )
+    monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
+    monkeypatch.setattr(
+        cli,
+        "get_pcie_static_info",
+        lambda **kwargs: {
+            "hardware": {
+                "npus": [
+                    {
+                        "dev_no": 0,
+                        "vendor_id": "0x209f",
+                        "device_id": "0x0000",
+                        "current_link_speed": "16.0 GT/s PCIe",
+                    }
+                ]
+            }
+        }
+        if kwargs.get("include_npus")
+        else {},
+    )
+    monkeypatch.setattr(cli, "get_nvml_gpu_static_info", lambda **_kwargs: {})
+    monkeypatch.setattr(cli, "_collect_mbltml_npu_metadata", lambda: {})
+
+    info = cli.collect_static_info()
+
+    assert "npus" not in info.get("hardware", {})
+
+
+def test_collect_static_info_enriches_four_mbltml_npus_by_pcie_order(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "get_host_static_info",
+        lambda sudo_password=None, sudo_password_provider=None, pcie_devices=None: {
+            "hardware": {}
+        },
+    )
+    monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
+    monkeypatch.setattr(
+        cli,
+        "get_pcie_static_info",
+        lambda **kwargs: {
+            "hardware": {
+                "npus": [
+                    {
+                        "dev_no": index,
+                        "vendor_id": "0x209f",
+                        "device_id": "0x0",
+                        "current_link_speed": f"speed-{index}",
+                        "current_link_width": str(index + 1),
+                        "status": "OK",
+                    }
+                    for index in range(4)
+                ]
+            }
+        }
+        if kwargs.get("include_npus")
+        else {},
+    )
+    monkeypatch.setattr(cli, "get_nvml_gpu_static_info", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        cli,
+        "_collect_mbltml_npu_metadata",
+        lambda: {
+            "hardware": {
+                "npus": [
+                    {
+                        "dev_no": index,
+                        "node_name": f"aries{index}",
+                        "vendor_id": "0x209f",
+                        "device_id": "0x0",
+                    }
+                    for index in range(4)
+                ]
+            }
         },
     )
 
-    info = cli.collect_static_info(pcie_vendor_id="1ed5")
+    info = cli.collect_static_info()
 
-    assert info == {"hardware": {}}
+    assert [npu["dev_no"] for npu in info["hardware"]["npus"]] == [0, 1, 2, 3]
+    assert [npu["node_name"] for npu in info["hardware"]["npus"]] == [
+        "aries0",
+        "aries1",
+        "aries2",
+        "aries3",
+    ]
+    assert [npu["current_link_speed"] for npu in info["hardware"]["npus"]] == [
+        "speed-0",
+        "speed-1",
+        "speed-2",
+        "speed-3",
+    ]
+
+
+def test_collect_parser_rejects_removed_pcie_npu_filter_option() -> None:
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["collect", "--npu-pci-vendor-id", "209f"])

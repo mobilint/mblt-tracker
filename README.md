@@ -105,14 +105,9 @@ mblt-tracker collect -o static-info.json
 
 # Include all PCIe devices instead of only GPU/NPU-related devices
 mblt-tracker collect --all-pcie-devices
-
-# Filter NPU PCIe discovery by vendor/device/class
-mblt-tracker collect --pcie-vendor-id 0x1ed5
-mblt-tracker collect --pcie-vendor-id 1ed5 --pcie-device-id 0100
-mblt-tracker collect --pcie-class-filter 0x12
 ```
 
-The CLI output is a JSON document containing best-effort host CPU, DRAM, motherboard, OS, GPU, NPU, driver, and PCIe information. For NVIDIA GPU entries, NVML is the source of truth for GPU identity and PCIe link metadata; OS PCIe discovery is used only to attach non-link PCIe identifiers and descriptive fields where available. On Linux, non-NVIDIA PCIe information is read from sysfs. On Windows, non-NVIDIA PCI devices are collected through PowerShell/CIM/PnP queries.
+The CLI output is a JSON document containing best-effort host CPU, DRAM, motherboard, OS, GPU, NPU, driver, and PCIe information. For NVIDIA GPU entries, NVML is the source of truth for GPU identity and PCIe link metadata; OS PCIe discovery is used only to attach non-link PCIe identifiers and descriptive fields where available. For Mobilint NPU entries, `mbltml` is the source of truth for device discovery, `dev_no`, driver, firmware, and device identity; OS PCIe discovery is best-effort enrichment only for link/status/descriptive fields and never creates NPU entries by itself. On Linux, non-NVIDIA PCIe information is read from sysfs. On Windows, non-NVIDIA PCI devices are collected through PowerShell/CIM/PnP queries.
 
 ### Example Output
 
@@ -620,7 +615,7 @@ Warning: NVML not available. GPU information will not be collected.
 | **Utilization (%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
 | **Memory (MB/%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
 | **Temperature (C)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
-| **Static Info** | ✅ Host/OS/DRAM/Motherboard | ✅ Host/OS/DRAM/Motherboard | ✅ NVML + PCIe | ✅ PCIe + `mbltml` |
+| **Static Info** | ✅ Host/OS/DRAM/Motherboard | ✅ Host/OS/DRAM/Motherboard | ✅ NVML + PCIe | ✅ `mbltml` + PCIe enrichment |
 | **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (`mbltml` Device Indices) |
 
 ---
@@ -673,7 +668,7 @@ Uses **mbltml** for OS-independent Mobilint NPU telemetry on Linux and Windows.
 - **Shared Rail Register Limitation**: NPU, DDR, PMIC, and GoldFinger rail power/current/voltage readings share the same firmware register mapping. The register initially points to the NPU rail. Reading non-NPU rails requires changing the selected rail with `mbltmlSetExtraPmicID()`, and firmware may take up to about 1 second to refresh the register value.
 - **Extra Rail Monitoring**: Set `rail_metrics="all"` or a list such as `rail_metrics=["npu", "ddr"]` to opt into DDR/PMIC/GoldFinger rail telemetry. Extra rails are sampled by a non-blocking state machine, so their effective sampling rate can be lower than `interval`; samples are recorded only after the firmware refresh delay has elapsed.
 - **Metric Naming**: Rail-specific measurements use explicit names such as `avg_npu_rail_power_w`, `avg_ddr_rail_current_a`, and `avg_goldfinger_rail_voltage_v` to distinguish PMIC rail telemetry from total device power.
-- **Static Info**: Reports Mobilint PCIe metadata and `mbltml` driver, firmware, device type, hardware version, and memory metadata where available.
+- **Static Info**: Uses `mbltml` as the NPU source of truth for device discovery, `dev_no`, driver, firmware, device type, hardware version, and memory metadata. OS PCIe discovery may enrich NPU entries with link speed/width, status, and descriptive fields, but it is never used as a fallback NPU discovery path.
 
 ---
 
@@ -754,7 +749,7 @@ Typical fields include:
 - `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
 - `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names
 - `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices. For NVIDIA GPUs, current and maximum PCIe link generation/width fields are sourced from NVML; OS PCIe discovery may add non-link fields such as vendor/device IDs and descriptive metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
-- `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, current/maximum link information, physical `mbltml` device index (`dev_no`), node name, device type, hardware version, memory metadata, and firmware metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
+- `hardware.npus`: Mobilint NPU devices discovered through `mbltml`. The `dev_no` field is the physical `mbltml` runtime device index, and entries may include vendor/device IDs, node name, device type, hardware version, memory metadata, firmware metadata, and PCIe link/status/descriptive enrichment where available. OS PCIe discovery never creates NPU entries by itself. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
 - `inference.gpu`: NVIDIA driver and CUDA driver versions. The CLI normalizes the CUDA driver version as a string such as `"13.0"`; `GPUDeviceTracker.get_static_info()` returns the raw NVML CUDA driver integer.
 - `hardware.npus[].firmware`: per-NPU firmware metadata where available. Firmware metadata is collected through `mbltml` when available.
 - `inference.npu_driver_version`: host Mobilint NPU driver version when available. Driver metadata is collected through `mbltml` when available.
@@ -764,7 +759,7 @@ PCIe discovery supports:
 - **Linux**: `/sys/bus/pci/devices`
 - **Windows**: PowerShell/CIM/PnP PCI device queries
 
-For tests or custom environments, `MBLT_TRACKER_PCI_SYSFS` can override the Linux PCI sysfs root. `NPUDeviceTracker.get_static_info()` can customize NPU PCIe matching with `MBLT_TRACKER_NPU_PCI_VENDOR_ID`, `MBLT_TRACKER_NPU_PCI_DEVICE_ID`, and `MBLT_TRACKER_NPU_PCI_CLASS_FILTER`. The `mblt-tracker collect` CLI uses the corresponding `--pcie-vendor-id`, `--pcie-device-id`, and `--pcie-class-filter` flags.
+For tests or custom environments, `MBLT_TRACKER_PCI_SYSFS` can override the Linux PCI sysfs root. NPU discovery and selection are always based on `mbltml`; PCIe discovery is used only for best-effort enrichment and raw PCIe reporting.
 
 ---
 

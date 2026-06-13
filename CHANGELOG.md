@@ -4,6 +4,12 @@
 
 ### Changed
 
+- Treat `mbltml` as the source of truth for Mobilint NPU static device entries;
+  PCIe discovery now enriches those entries only and is no longer used as an NPU
+  fallback discovery or filter path.
+- Removed CLI NPU PCIe filter options (`--pcie-vendor-id`, `--pcie-device-id`,
+  and `--pcie-class-filter`) and the corresponding `NPUDeviceTracker` PCIe
+  filter environment behavior.
 - Switched Mobilint NPU tracking from `mobilint-cli` subprocess parsing to the
   OS-independent `mbltml` Python API.
 - Made `mbltml` a required runtime dependency because `mblt-tracker` is built as

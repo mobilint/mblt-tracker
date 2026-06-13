@@ -1195,6 +1195,7 @@ def get_pcie_static_info(
     include_all_devices: bool = False,
     devices: list[dict[str, object]] | None = None,
     include_private_identifiers: bool = False,
+    include_npus: bool = True,
 ) -> dict[str, object]:
     """Collect best-effort PCIe information.
 
@@ -1234,8 +1235,8 @@ def get_pcie_static_info(
             )
             for dev_no, device in enumerate(gpus)
         ]
-    npus = _find_all_npu_devices(devices, vendor_id, device_id, class_filter)
     inference_info: dict[str, object] = {}
+    npus = _find_all_npu_devices(devices, vendor_id, device_id, class_filter) if include_npus else []
     if npus:
         npu_device_indices = _get_npu_device_indices(devices)
         formatted_npus = [
@@ -1850,6 +1851,152 @@ def _format_pcie_device(
         if max_lane_width is not None:
             formatted["max_lane_width"] = max_lane_width
     return formatted
+
+
+_NPU_PCIE_ENRICHMENT_FIELDS = frozenset(
+    {
+        "bus_address",
+        "pnp_device_id",
+        "name",
+        "manufacturer",
+        "status",
+        "driver_date",
+        "driver_description",
+        "driver_provider",
+        "current_link_speed",
+        "current_link_width",
+        "max_link_speed",
+        "max_link_width",
+        "max_link_generation",
+        "max_lane_width",
+    }
+)
+
+
+def enrich_mbltml_npus_with_pcie_info(
+    mbltml_info: dict[str, object],
+    pcie_info: Mapping[str, object],
+) -> None:
+    """Best-effort enrich mbltml-sourced NPU entries with OS PCIe metadata.
+
+    The NPU list and ``dev_no`` namespace remain owned by mbltml. PCIe discovery
+    may only add OS-level descriptive/link fields and must not create, remove, or
+    overwrite mbltml identity/runtime fields.
+    """
+    mbltml_npus = _extract_hardware_device_list(mbltml_info, "npus")
+    pcie_npus = _extract_hardware_device_list(pcie_info, "npus")
+    if not mbltml_npus or not pcie_npus:
+        return
+
+    used_pcie_indices: set[int] = set()
+    for mbltml_index, mbltml_npu in enumerate(mbltml_npus):
+        pcie_index = _find_pcie_enrichment_match(
+            mbltml_npu,
+            pcie_npus,
+            used_pcie_indices,
+            mbltml_index,
+        )
+        if pcie_index is None:
+            continue
+        used_pcie_indices.add(pcie_index)
+        _apply_npu_pcie_enrichment(mbltml_npu, pcie_npus[pcie_index])
+
+
+def _extract_hardware_device_list(
+    info: Mapping[str, object], key: str
+) -> list[dict[str, object]]:
+    hardware = info.get("hardware")
+    if not isinstance(hardware, Mapping):
+        return []
+    devices = hardware.get(key)
+    if not isinstance(devices, list):
+        return []
+    return [device for device in devices if isinstance(device, dict)]
+
+
+def _find_pcie_enrichment_match(
+    mbltml_npu: Mapping[str, object],
+    pcie_npus: list[dict[str, object]],
+    used_pcie_indices: set[int],
+    mbltml_index: int,
+) -> int | None:
+    for pcie_index, pcie_npu in enumerate(pcie_npus):
+        if pcie_index in used_pcie_indices:
+            continue
+        if _device_identity_matches(dict(mbltml_npu), pcie_npu):
+            return pcie_index
+
+    identity_matches = [
+        pcie_index
+        for pcie_index, pcie_npu in enumerate(pcie_npus)
+        if pcie_index not in used_pcie_indices and _pci_identity_matches(mbltml_npu, pcie_npu)
+    ]
+    if len(identity_matches) == 1:
+        return identity_matches[0]
+    if identity_matches:
+        if mbltml_index in identity_matches:
+            return mbltml_index
+        return min(identity_matches)
+
+    if mbltml_index < len(pcie_npus) and mbltml_index not in used_pcie_indices:
+        return mbltml_index
+    return None
+
+
+def _apply_npu_pcie_enrichment(
+    mbltml_npu: dict[str, object], pcie_npu: Mapping[str, object]
+) -> None:
+    for key in _NPU_PCIE_ENRICHMENT_FIELDS:
+        if key in pcie_npu and key not in mbltml_npu:
+            mbltml_npu[key] = pcie_npu[key]
+    if "max_link_generation" not in mbltml_npu and pcie_npu.get("max_link_speed") is not None:
+        max_generation = _link_speed_to_generation(str(pcie_npu["max_link_speed"]))
+        if max_generation is not None:
+            mbltml_npu["max_link_generation"] = max_generation
+    if "max_lane_width" not in mbltml_npu and pcie_npu.get("max_link_width") is not None:
+        max_lane_width = _format_max_lane_width(pcie_npu["max_link_width"])
+        if max_lane_width is not None:
+            mbltml_npu["max_lane_width"] = max_lane_width
+
+
+def _pci_identity_matches(
+    metadata: Mapping[str, object], selected_device: Mapping[str, object]
+) -> bool:
+    required_keys = ("vendor_id", "device_id")
+    if not all(_normalized_identity(metadata.get(key)) for key in required_keys):
+        return False
+    if not all(_normalized_identity(selected_device.get(key)) for key in required_keys):
+        return False
+
+    for key in required_keys:
+        if _normalized_identity(metadata.get(key)) != _normalized_identity(
+            selected_device.get(key)
+        ):
+            return False
+
+    for key in ("subsystem_vendor_id", "subsystem_device_id"):
+        metadata_value = _normalized_identity(metadata.get(key))
+        selected_value = _normalized_identity(selected_device.get(key))
+        if metadata_value is not None and selected_value is not None:
+            if metadata_value != selected_value:
+                return False
+    return True
+
+
+def _normalized_identity(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text.startswith("0x"):
+        try:
+            return f"0x{int(text, 16):x}"
+        except ValueError:
+            return text
+    if all(char in "0123456789abcdef" for char in text):
+        return f"0x{int(text, 16):x}"
+    return text
 
 
 def _sanitize_pcie_device_for_public_output(
