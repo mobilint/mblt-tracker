@@ -75,6 +75,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
         self._pending_extra_rail: str | None = None
         self._next_extra_rail_index = 0
         self._npu_sample_due_after_extra = False
+        self._unavailable_extra_rails: set[str] = set()
         self.reset()
 
     def _func_for_sched(self) -> None:
@@ -129,9 +130,18 @@ class NPUDeviceTracker(BaseDeviceTracker):
             return None
         selected_devices = self._selected_device_indices()
         if self._pending_extra_rail is None:
-            rail = extra_rails[self._next_extra_rail_index % len(extra_rails)]
-            if self._select_extra_rail_for_devices(rail, selected_devices, now):
-                self._pending_extra_rail = rail
+            for _ in range(len(extra_rails)):
+                rail = extra_rails[self._next_extra_rail_index % len(extra_rails)]
+                if rail in self._unavailable_extra_rails:
+                    self._next_extra_rail_index += 1
+                    continue
+                if self._select_extra_rail_for_devices(rail, selected_devices, now):
+                    self._pending_extra_rail = rail
+                    break
+                self._unavailable_extra_rails.add(rail)
+                self._next_extra_rail_index += 1
+            else:
+                return None
 
         rail = self._pending_extra_rail
         if rail is None:
