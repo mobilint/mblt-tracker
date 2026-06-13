@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import sys
+
+import pytest
 
 from mblt_tracker import cli
 
@@ -118,6 +121,15 @@ def test_collect_static_info_merges_mbltml_npu_driver_metadata(monkeypatch) -> N
         },
         "inference": {"npu_driver_version": "1.8.1.1348"},
     }
+
+
+def test_collect_mbltml_npu_metadata_import_errors_are_not_suppressed(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "mblt_tracker.device_tracker_npu", None)
+
+    with pytest.raises(ModuleNotFoundError):
+        cli._collect_mbltml_npu_metadata(filtered_npus=None)
 
 
 def test_collect_static_info_merges_mbltml_npu_firmware_metadata(

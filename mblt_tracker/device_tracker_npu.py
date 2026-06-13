@@ -6,6 +6,7 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
+import mbltml
 import numpy as np
 
 from .device_tracker import BaseDeviceTracker
@@ -15,12 +16,6 @@ from .static_info import (
     get_all_pcie_devices,
     get_pcie_static_info,
 )
-
-try:  # pragma: no cover - exercised through tests with a fake module
-    import mbltml
-except Exception:  # pragma: no cover
-    mbltml = None  # type: ignore[assignment]
-
 
 _LOGGER = logging.getLogger(__name__)
 _MB_TO_BYTES = 1024 * 1024
@@ -64,7 +59,6 @@ class NPUDeviceTracker(BaseDeviceTracker):
                 firmware refresh period (1 second).
         """
         super().__init__(interval=interval)
-        _ensure_mbltml_available()
         _initialize_mbltml()
 
         self._npu_id = _normalize_npu_ids(npu_id)
@@ -79,6 +73,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
 
         self._selected_rail: dict[int, str] = dict.fromkeys(range(self._device_count), "npu")
         self._rail_selected_at: dict[int, float] = dict.fromkeys(range(self._device_count), 0.0)
+        self._pending_extra_rail: str | None = None
         self._next_extra_rail_index = 0
         self.reset()
 
@@ -98,6 +93,8 @@ class NPUDeviceTracker(BaseDeviceTracker):
             sample = self._read_device_sample(dev_no, extra_rail_to_read, now)
             if sample is not None:
                 samples.append(sample)
+        if extra_rail_to_read is not None:
+            self._complete_extra_rail_sample(extra_rail_to_read)
         return samples
 
     @property
@@ -108,14 +105,36 @@ class NPUDeviceTracker(BaseDeviceTracker):
         extra_rails = [rail for rail in self._rail_metrics if rail != "npu"]
         if not extra_rails:
             return None
-        rail = extra_rails[self._next_extra_rail_index % len(extra_rails)]
-        self._next_extra_rail_index += 1
-        for dev_no in self._selected_device_indices():
+        selected_devices = self._selected_device_indices()
+        if self._pending_extra_rail is None:
+            rail = extra_rails[self._next_extra_rail_index % len(extra_rails)]
+            self._select_extra_rail_for_devices(rail, selected_devices, now)
+            self._pending_extra_rail = rail
+
+        rail = self._pending_extra_rail
+        if all(
+            self._selected_rail.get(dev_no) == rail
+            and now - self._rail_selected_at.get(dev_no, 0.0)
+            >= _EXTRA_RAIL_REFRESH_PERIOD_S
+            for dev_no in selected_devices
+        ):
+            return rail
+        return None
+
+    def _select_extra_rail_for_devices(
+        self, rail: str, selected_devices: list[int], now: float
+    ) -> None:
+        for dev_no in selected_devices:
             if self._selected_rail.get(dev_no) != rail:
                 if _set_extra_rail(dev_no, rail):
                     self._selected_rail[dev_no] = rail
                     self._rail_selected_at[dev_no] = now
-        return rail
+
+    def _complete_extra_rail_sample(self, rail: str) -> None:
+        if self._pending_extra_rail != rail:
+            return
+        self._pending_extra_rail = None
+        self._next_extra_rail_index += 1
 
     def _read_device_sample(
         self, dev_no: int, extra_rail_to_read: str | None, now: float
@@ -151,7 +170,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
                 if "npu" in self._rail_metrics and _set_extra_rail(dev_no, "npu"):
                     self._selected_rail[dev_no] = "npu"
                     self._rail_selected_at[dev_no] = now
-        elif "npu" in self._rail_metrics:
+        elif "npu" in self._rail_metrics and self._pending_extra_rail is None:
             if self._selected_rail.get(dev_no) == "npu":
                 sample.update(_read_rail_values(dev_no, "npu"))
             elif _set_extra_rail(dev_no, "npu"):
@@ -323,11 +342,6 @@ class NPUDeviceTracker(BaseDeviceTracker):
         self._device_memory_total_mb: dict[int, float] = {}
 
 
-def _ensure_mbltml_available() -> None:
-    if mbltml is None:
-        raise RuntimeError("NPU tracking requires the mbltml package")
-
-
 def _initialize_mbltml() -> None:
     try:
         mbltml.mbltmlInitDevices(_supported_mbltml_device_types())
@@ -492,7 +506,6 @@ def _hardware_version_name(value: int | None) -> str | None:
 
 
 def _get_mbltml_static_info() -> dict[str, object]:
-    _ensure_mbltml_available()
     try:
         _initialize_mbltml()
     except Exception:

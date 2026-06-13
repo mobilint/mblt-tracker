@@ -209,6 +209,41 @@ def test_extra_rail_samples_wait_for_firmware_refresh(fake_mbltml, monkeypatch):
     assert tracker.get_metric()["ddr_rail_power_w_samples"] == 1
 
 
+def test_multiple_extra_rails_wait_before_advancing(fake_mbltml, monkeypatch):
+    now = 100.0
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker = NPUDeviceTracker(
+        interval=0.1,
+        npu_id=0,
+        rail_metrics=["npu", "ddr", "pmic"],
+    )
+
+    tracker._func_for_sched()
+    assert fake_mbltml.set_calls == [(0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_DDR)]
+    assert tracker.get_ddr_rail_power_trace() == []
+
+    now = 100.5
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker._func_for_sched()
+    assert fake_mbltml.set_calls == [(0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_DDR)]
+    assert tracker.get_ddr_rail_power_trace() == []
+
+    now = 101.1
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker._func_for_sched()
+    assert tracker.get_ddr_rail_power_trace() == [(101.1, 3.0)]
+
+    now = 101.2
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker._func_for_sched()
+    assert fake_mbltml.set_calls[-1] == (0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_PMIC)
+
+    now = 102.3
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker._func_for_sched()
+    assert tracker.get_pmic_rail_power_trace() == [(102.3, 4.0)]
+
+
 def test_invalid_npu_id_and_rail_are_rejected(fake_mbltml):
     with pytest.raises(ValueError, match="Invalid NPU ID"):
         NPUDeviceTracker(npu_id=-1)

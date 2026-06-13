@@ -373,9 +373,6 @@ WARNING:root:imports error
     },
     "npus": [
       {
-        "board_name": "aries0",
-        "card_id": 0,
-        "card_model": "MLA100",
         "class": "0x7800002",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
@@ -394,6 +391,7 @@ WARNING:root:imports error
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
         "name": "Aries",
+        "node_name": "aries0",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x1093",
@@ -477,9 +475,6 @@ Warning: NVML not available. GPU information will not be collected.
     },
     "npus": [
       {
-        "board_name": "aries0",
-        "card_id": 0,
-        "card_model": "MLA400",
         "class": "0x7800002",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
@@ -498,6 +493,7 @@ Warning: NVML not available. GPU information will not be collected.
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
         "name": "MOBILINT NPU Accelerator",
+        "node_name": "aries0",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -505,9 +501,6 @@ Warning: NVML not available. GPU information will not be collected.
         "vendor_id": "0x209F"
       },
       {
-        "board_name": "aries1",
-        "card_id": 0,
-        "card_model": "MLA400",
         "class": "0x7800002",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
@@ -526,6 +519,7 @@ Warning: NVML not available. GPU information will not be collected.
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
         "name": "MOBILINT NPU Accelerator",
+        "node_name": "aries1",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -533,9 +527,6 @@ Warning: NVML not available. GPU information will not be collected.
         "vendor_id": "0x209F"
       },
       {
-        "board_name": "aries2",
-        "card_id": 0,
-        "card_model": "MLA400",
         "class": "0x7800002",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
@@ -554,6 +545,7 @@ Warning: NVML not available. GPU information will not be collected.
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
         "name": "MOBILINT NPU Accelerator",
+        "node_name": "aries2",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -561,9 +553,6 @@ Warning: NVML not available. GPU information will not be collected.
         "vendor_id": "0x209F"
       },
       {
-        "board_name": "aries3",
-        "card_id": 0,
-        "card_model": "MLA400",
         "class": "0x7800002",
         "current_link_speed": "16.0 GT/s PCIe",
         "current_link_width": "8",
@@ -582,6 +571,7 @@ Warning: NVML not available. GPU information will not be collected.
         "max_link_width": "8",
         "memory_total_bytes": 17179869184,
         "name": "MOBILINT NPU Accelerator",
+        "node_name": "aries3",
         "product": "Aries",
         "revision": "0x2",
         "subsystem_device_id": "0x108B",
@@ -631,7 +621,7 @@ Warning: NVML not available. GPU information will not be collected.
 | **Memory (MB/%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
 | **Temperature (C)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
 | **Static Info** | ✅ Host/OS/DRAM/Motherboard | ✅ Host/OS/DRAM/Motherboard | ✅ NVML + PCIe | ✅ PCIe + `mbltml` |
-| **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (Logical NPU Cards) |
+| **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (`mbltml` Device Indices) |
 
 ---
 
@@ -764,9 +754,7 @@ Typical fields include:
 - `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
 - `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names
 - `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices. For NVIDIA GPUs, current and maximum PCIe link generation/width fields are sourced from NVML; OS PCIe discovery may add non-link fields such as vendor/device IDs and descriptive metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
-- `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, current/maximum link information, and firmware metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
-- `hardware.npus[].card_model`: best-effort Mobilint card model classification such as `MLA100` or `MLA400` when `mbltml` exposes enough information
-- `hardware.npus[].card_id`: logical NPU card ID used by `NPUDeviceTracker(npu_id=...)`; MLA400 Aries chips share the same card ID
+- `hardware.npus`: Mobilint PCIe devices, including vendor/device IDs, current/maximum link information, physical `mbltml` device index (`dev_no`), node name, device type, hardware version, memory metadata, and firmware metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
 - `inference.gpu`: NVIDIA driver and CUDA driver versions. The CLI normalizes the CUDA driver version as a string such as `"13.0"`; `GPUDeviceTracker.get_static_info()` returns the raw NVML CUDA driver integer.
 - `hardware.npus[].firmware`: per-NPU firmware metadata where available. Firmware metadata is collected through `mbltml` when available.
 - `inference.npu_driver_version`: host Mobilint NPU driver version when available. Driver metadata is collected through `mbltml` when available.

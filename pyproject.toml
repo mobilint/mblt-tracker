@@ -25,7 +25,7 @@ dependencies = [
     "apscheduler>=3.11.2",
     "pyRAPL>=0.2.3.1",
     "psutil>=7.0.0",
-    "mbltml>=0.0.0",
+    "mbltml==0.0.0",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -115,7 +115,7 @@ known-first-party = ["mblt_tracker"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-addopts = "-ra -q --timeout=300"
+addopts = "-ra -q"
 testpaths = ["tests"]
 
 [tool.mypy]

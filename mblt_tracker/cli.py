@@ -152,10 +152,8 @@ def _collect_mbltml_npu_metadata(
 ) -> dict[str, object]:
     if filtered_npus == []:
         return {}
-    try:
-        from .device_tracker_npu import _get_mbltml_static_info
-    except Exception:
-        return {}
+    from .device_tracker_npu import _get_mbltml_static_info
+
     info = _get_mbltml_static_info()
     if filtered_npus is not None:
         _filter_npu_metadata_to_selected_devices(info, filtered_npus)
