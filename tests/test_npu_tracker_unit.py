@@ -154,6 +154,33 @@ def test_npu_default_sampling_uses_mbltml_without_rail_selection(fake_mbltml, mo
     }
 
 
+def test_npu_aggregate_memory_usage_pct_uses_summed_usage_and_capacity(
+    fake_mbltml, monkeypatch
+) -> None:
+    memory_usage_mb = {0: 1024, 1: 0}
+    memory_total_mb = {0: 1024, 1: 15360}
+    monkeypatch.setattr(
+        fake_mbltml,
+        "mbltmlGetMemoryUsage",
+        lambda dev_no: memory_usage_mb[dev_no] * 1024 * 1024,
+    )
+    monkeypatch.setattr(
+        fake_mbltml,
+        "mbltmlGetMemoryTotal",
+        lambda dev_no: memory_total_mb[dev_no] * 1024 * 1024,
+    )
+    monkeypatch.setattr(npu_module.time, "time", lambda: 100.0)
+    tracker = NPUDeviceTracker(interval=0.1)
+
+    tracker._func_for_sched()
+
+    metrics = tracker.get_metric()
+    assert metrics["avg_memory_usage_mb"] == 1024.0
+    assert metrics["memory_total_mb"] == 16384.0
+    assert metrics["avg_memory_usage_pct"] == pytest.approx(6.25)
+    assert metrics["avg_memory_usage_pct"] != pytest.approx(50.0)
+
+
 def test_npu_id_filters_mbltml_devices(fake_mbltml, monkeypatch):
     tracker = NPUDeviceTracker(interval=0.1, npu_id=1)
     monkeypatch.setattr(npu_module.time, "time", lambda: 100.0)
@@ -318,3 +345,62 @@ def test_get_static_info_limits_mbltml_metadata_to_selected_npu(
             "memory_total_bytes": 1073741824,
         }
     ]
+
+
+def test_get_static_info_limits_mbltml_metadata_to_filtered_pcie_npus(
+    fake_mbltml, monkeypatch
+) -> None:
+    monkeypatch.setenv("MBLT_TRACKER_NPU_PCI_VENDOR_ID", "209f")
+    monkeypatch.setattr(npu_module, "get_all_pcie_devices", lambda: [])
+    monkeypatch.setattr(
+        npu_module,
+        "get_pcie_static_info",
+        lambda **kwargs: {
+            "hardware": {
+                "npus": [
+                    {
+                        "dev_no": 0,
+                        "vendor_id": "0x209f",
+                        "device_id": "0x0",
+                        "subsystem_vendor_id": "0x402",
+                        "subsystem_device_id": "0x108b",
+                    }
+                ]
+            }
+        },
+    )
+
+    tracker = NPUDeviceTracker()
+
+    info = tracker.get_static_info()
+
+    assert info["hardware"]["npus"] == [
+        {
+            "dev_no": 0,
+            "vendor_id": "0x209f",
+            "device_id": "0x0",
+            "subsystem_vendor_id": "0x402",
+            "subsystem_device_id": "0x108b",
+            "node_name": "aries0",
+            "device_type": "Aries",
+            "hardware_version": "Aries2",
+            "firmware": {"version": "2.0.1", "revision": "7"},
+            "link_generation": 4,
+            "lane_width": 8,
+            "revision": "0x2",
+            "class": "0x7800002",
+            "memory_total_bytes": 1073741824,
+        }
+    ]
+
+
+def test_get_static_info_skips_mbltml_metadata_when_pcie_filter_matches_no_npus(
+    fake_mbltml, monkeypatch
+) -> None:
+    monkeypatch.setenv("MBLT_TRACKER_NPU_PCI_VENDOR_ID", "209f")
+    monkeypatch.setattr(npu_module, "get_all_pcie_devices", lambda: [])
+    monkeypatch.setattr(npu_module, "get_pcie_static_info", lambda **kwargs: {})
+
+    tracker = NPUDeviceTracker()
+
+    assert tracker.get_static_info() == {}
