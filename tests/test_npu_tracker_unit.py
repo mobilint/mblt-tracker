@@ -253,17 +253,28 @@ def test_failed_extra_rail_selection_does_not_leave_pending_state(
 
     tracker._func_for_sched()
     assert tracker._pending_extra_rail is None
+    assert tracker._selected_rail == {0: "npu", 1: "npu"}
+    assert fake_mbltml.selected_rail == {
+        0: fake_mbltml.MBLTML_EXTRA_PMIC_ID_NPU,
+        1: fake_mbltml.MBLTML_EXTRA_PMIC_ID_NPU,
+    }
+    assert fake_mbltml.set_calls == [
+        (0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_DDR),
+        (0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_NPU),
+    ]
     assert tracker.get_ddr_rail_power_trace() == []
-    assert tracker.get_npu_rail_power_trace() == [(100.0, 3.0)]
+    assert tracker.get_npu_rail_power_trace() == [(100.0, 5.0)]
 
     now = 101.1
     monkeypatch.setattr(npu_module.time, "time", lambda: now)
     tracker._func_for_sched()
 
     assert tracker._pending_extra_rail is None
+    assert tracker._selected_rail == {0: "npu", 1: "npu"}
     assert fake_mbltml.set_calls.count((0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_DDR)) == 2
+    assert fake_mbltml.set_calls.count((0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_NPU)) == 2
     assert tracker.get_ddr_rail_power_trace() == []
-    assert tracker.get_npu_rail_power_trace()[-1] == (101.1, 3.0)
+    assert tracker.get_npu_rail_power_trace()[-1] == (101.1, 5.0)
 
 
 def test_missing_extra_rail_constant_does_not_crash(monkeypatch):

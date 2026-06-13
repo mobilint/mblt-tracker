@@ -125,15 +125,23 @@ class NPUDeviceTracker(BaseDeviceTracker):
     def _select_extra_rail_for_devices(
         self, rail: str, selected_devices: list[int], now: float
     ) -> bool:
-        all_selected = True
+        changed_devices: list[int] = []
         for dev_no in selected_devices:
             if self._selected_rail.get(dev_no) != rail:
                 if _set_extra_rail(dev_no, rail):
                     self._selected_rail[dev_no] = rail
                     self._rail_selected_at[dev_no] = now
+                    changed_devices.append(dev_no)
                 else:
-                    all_selected = False
-        return all_selected
+                    self._rollback_devices_to_npu_rail(changed_devices, now)
+                    return False
+        return True
+
+    def _rollback_devices_to_npu_rail(self, dev_nos: list[int], now: float) -> None:
+        for dev_no in dev_nos:
+            if _set_extra_rail(dev_no, "npu"):
+                self._selected_rail[dev_no] = "npu"
+                self._rail_selected_at[dev_no] = now
 
     def _complete_extra_rail_sample(self, rail: str) -> None:
         if self._pending_extra_rail != rail:
