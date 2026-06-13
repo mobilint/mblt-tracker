@@ -323,23 +323,35 @@ def test_multiple_extra_rails_wait_before_advancing(fake_mbltml, monkeypatch):
     now = 101.2
     monkeypatch.setattr(npu_module.time, "time", lambda: now)
     tracker._func_for_sched()
-    assert tracker.get_npu_rail_power_trace() == [(101.2, 2.0)]
+    assert tracker.get_npu_rail_power_trace() == []
     assert fake_mbltml.set_calls[-1] == (0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_NPU)
 
     now = 101.3
     monkeypatch.setattr(npu_module.time, "time", lambda: now)
     tracker._func_for_sched()
+    assert tracker.get_npu_rail_power_trace() == []
+    assert fake_mbltml.set_calls[-1] == (0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_NPU)
+
+    now = 102.1
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker._func_for_sched()
+    assert tracker.get_npu_rail_power_trace() == [(102.1, 2.0)]
+    assert fake_mbltml.set_calls[-1] == (0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_NPU)
+
+    now = 102.2
+    monkeypatch.setattr(npu_module.time, "time", lambda: now)
+    tracker._func_for_sched()
     assert fake_mbltml.set_calls[-1] == (0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_PMIC)
 
-    now = 102.3
+    now = 103.2
     monkeypatch.setattr(npu_module.time, "time", lambda: now)
     tracker._func_for_sched()
-    assert tracker.get_pmic_rail_power_trace() == [(102.3, 4.0)]
+    assert tracker.get_pmic_rail_power_trace() == [(103.2, 4.0)]
 
-    now = 102.4
+    now = 103.3
     monkeypatch.setattr(npu_module.time, "time", lambda: now)
     tracker._func_for_sched()
-    assert tracker.get_npu_rail_power_trace() == [(101.2, 2.0), (102.4, 2.0)]
+    assert tracker.get_npu_rail_power_trace() == [(102.1, 2.0)]
 
 
 def test_all_rail_sampling_inserts_npu_slot_between_extra_rails(

@@ -91,10 +91,17 @@ class NPUDeviceTracker(BaseDeviceTracker):
             self._npu_sample_due_after_extra
             and "npu" in self._rail_metrics
             and self._pending_extra_rail is None
+            and self._selected_devices_ready_for_rail("npu", selected, now)
+        )
+        wait_for_npu_refresh_after_extra = (
+            self._npu_sample_due_after_extra
+            and "npu" in self._rail_metrics
+            and self._pending_extra_rail is None
+            and not sample_npu_before_next_extra
         )
         extra_rail_to_read = (
             None
-            if sample_npu_before_next_extra
+            if sample_npu_before_next_extra or wait_for_npu_refresh_after_extra
             else self._advance_extra_rail_state(now)
             if self._has_extra_rails
             else None
@@ -129,14 +136,19 @@ class NPUDeviceTracker(BaseDeviceTracker):
         rail = self._pending_extra_rail
         if rail is None:
             return None
-        if all(
+        if self._selected_devices_ready_for_rail(rail, selected_devices, now):
+            return rail
+        return None
+
+    def _selected_devices_ready_for_rail(
+        self, rail: str, selected_devices: list[int], now: float
+    ) -> bool:
+        return all(
             self._selected_rail.get(dev_no) == rail
             and now - self._rail_selected_at.get(dev_no, 0.0)
             >= _EXTRA_RAIL_REFRESH_PERIOD_S
             for dev_no in selected_devices
-        ):
-            return rail
-        return None
+        )
 
     def _select_extra_rail_for_devices(
         self, rail: str, selected_devices: list[int], now: float
@@ -202,7 +214,12 @@ class NPUDeviceTracker(BaseDeviceTracker):
                     self._npu_sample_due_after_extra = True
         elif "npu" in self._rail_metrics and self._pending_extra_rail is None:
             if self._selected_rail.get(dev_no) == "npu":
-                sample.update(_read_rail_values(dev_no, "npu"))
+                selected_at = self._rail_selected_at.get(dev_no, 0.0)
+                if (
+                    not self._npu_sample_due_after_extra
+                    or now - selected_at >= _EXTRA_RAIL_REFRESH_PERIOD_S
+                ):
+                    sample.update(_read_rail_values(dev_no, "npu"))
             elif _set_extra_rail(dev_no, "npu"):
                 self._selected_rail[dev_no] = "npu"
                 self._rail_selected_at[dev_no] = now
