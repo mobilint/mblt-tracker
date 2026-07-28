@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintain MBLT Tracker"
+  short_description: "Maintain tracker backends and metadata safely"
+  default_prompt: "Use $maintain-mblt-tracker to update tracker behavior, tests, and synchronized documentation."
