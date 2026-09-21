@@ -626,13 +626,25 @@ Warning: NVML not available. GPU information will not be collected.
 
 Uses **pyRAPL** for power measurements and **psutil** for utilization/memory.
 
-- **Permission**: Requires read access to Intel RAPL sysfs.
+- **Permission**: Requires read access to Intel RAPL sysfs. Grant only the
+  container user's UID or a dedicated group read/traverse access to the required
+  powercap files (for example, with a host udev rule or ACL); do not make the
+  whole tree world-readable.
+
+- **Docker**: Bind-mount powercap read-only and run as a non-root user without
+  additional capabilities. The tracker does not require `--privileged`:
 
   ```bash
-  sudo chmod -R a+r /sys/class/powercap/intel-rapl/
+  docker run --rm \
+    --mount type=bind,src=/sys/class/powercap,dst=/sys/class/powercap,readonly \
+    --user "$(id -u):$(id -g)" \
+    --cap-drop=ALL \
+    --security-opt=no-new-privileges \
+    <image> <command>
   ```
 
-- **Docker**: Run containers with `--privileged` or mount the powercap directory.
+  Ensure that this UID/GID has the host-side read/traverse permissions described
+  above; the read-only mount prevents writes but does not override file permissions.
 
 - **Features**: Tracks total system CPU usage or specific indices (e.g., `CPUDeviceTracker(cpu_id=[0, 1])`).
 - **Temperature**: Uses `psutil.sensors_temperatures()` when the platform exposes CPU thermal sensors.

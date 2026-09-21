@@ -31,6 +31,8 @@
 
 ### Fixed
 
+- Replaced privileged-container CPU telemetry guidance with a least-privilege,
+  read-only powercap mount run as a non-root user without added capabilities.
 - Avoided over-merging filtered NPU static metadata by no longer matching
   Mobilint devices on `vendor_id` alone.
 - Preserved public static output sanitization while merging `mbltml` NPU
