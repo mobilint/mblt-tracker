@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 1.0.2
+
+### Fixed
+
+- Prevented optional sudo credentials used for Linux DMI collection from being
+  exposed to executables substituted through an attacker-controlled `PATH`. The
+  password-bearing `sudo -S` call now runs only a `sudo` found at a trusted
+  absolute path and is skipped otherwise; credential-free `dmidecode` and
+  `sudo -n` attempts still fall back to a `PATH` lookup so hosts with
+  non-standard layouts keep their DIMM and motherboard coverage.
+
 ## 1.0.0
 
 ### Changed
