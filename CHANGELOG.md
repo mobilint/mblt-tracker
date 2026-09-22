@@ -31,6 +31,12 @@
 
 ### Fixed
 
+- Replaced privileged-container CPU telemetry guidance with a least-privilege
+  setup: a udev rule that grants a dedicated `powercap` group read access to
+  the RAPL `energy_uj` counters, and a Docker example that bind-mounts the
+  backing `/sys/devices/virtual/powercap` hierarchy read-only at
+  `/sys/class/powercap`, runs as a non-root user with that group added via
+  `--group-add`, and adds no capabilities.
 - Avoided over-merging filtered NPU static metadata by no longer matching
   Mobilint devices on `vendor_id` alone.
 - Preserved public static output sanitization while merging `mbltml` NPU

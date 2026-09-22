@@ -626,13 +626,51 @@ Warning: NVML not available. GPU information will not be collected.
 
 Uses **pyRAPL** for power measurements and **psutil** for utilization/memory.
 
-- **Permission**: Requires read access to Intel RAPL sysfs.
+- **Permission**: Requires read access to the Intel RAPL `energy_uj` counters
+  under `/sys/class/powercap/intel-rapl*/`, which the kernel exposes root-only
+  (mode `0400`). sysfs does not support POSIX ACLs, so `setfacl` fails with
+  `Operation not supported`; grant access by changing the counters' group and
+  mode instead, and do not make the whole tree world-readable. A udev rule
+  applies the change at boot and device creation, for both package zones and
+  DRAM sub-zones:
 
   ```bash
-  sudo chmod -R a+r /sys/class/powercap/intel-rapl/
+  sudo groupadd --system powercap
+  sudo tee /etc/udev/rules.d/99-powercap.rules <<'EOF'
+  SUBSYSTEM=="powercap", KERNEL=="intel-rapl:*", ACTION=="add", RUN+="/bin/chgrp powercap $sys$devpath/energy_uj", RUN+="/bin/chmod g+r $sys$devpath/energy_uj"
+  EOF
+  sudo udevadm control --reload-rules
+  sudo udevadm trigger --subsystem-match=powercap --action=add
   ```
 
-- **Docker**: Run containers with `--privileged` or mount the powercap directory.
+  Host users only need membership in the `powercap` group
+  (`sudo usermod -aG powercap "$USER"`).
+
+- **Docker**: Bind-mount the backing powercap hierarchy read-only at the class
+  lookup path and run as a non-root user without additional capabilities.
+  `/sys/class/powercap` only holds symlinks into
+  `/sys/devices/virtual/powercap`, so binding the class directory alone leaves
+  the targets unreachable on runtimes that mask `/sys/devices`; mounting the
+  backing directory at `/sys/class/powercap` exposes the real
+  `intel-rapl/intel-rapl:N/` tree, which is the path pyRAPL reads. `--user`
+  sets only the primary UID/GID and does not propagate the host user's
+  supplementary groups, so pass the `powercap` GID with `--group-add`. Use the
+  numeric GID, because a group name is resolved against the container's
+  `/etc/group`. The tracker does not require `--privileged`:
+
+  ```bash
+  docker run --rm \
+    --mount type=bind,src=/sys/devices/virtual/powercap,dst=/sys/class/powercap,readonly \
+    --user "$(id -u):$(id -g)" \
+    --group-add "$(getent group powercap | cut -d: -f3)" \
+    --cap-drop=ALL \
+    --security-opt=no-new-privileges \
+    <image> <command>
+  ```
+
+  The read-only mount only prevents writes; it does not override file
+  permissions, so the container process still needs the host-side `powercap`
+  group access described above.
 
 - **Features**: Tracks total system CPU usage or specific indices (e.g., `CPUDeviceTracker(cpu_id=[0, 1])`).
 - **Temperature**: Uses `psutil.sensors_temperatures()` when the platform exposes CPU thermal sensors.
