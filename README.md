@@ -626,25 +626,46 @@ Warning: NVML not available. GPU information will not be collected.
 
 Uses **pyRAPL** for power measurements and **psutil** for utilization/memory.
 
-- **Permission**: Requires read access to Intel RAPL sysfs. Grant only the
-  container user's UID or a dedicated group read/traverse access to the required
-  powercap files (for example, with a host udev rule or ACL); do not make the
-  whole tree world-readable.
+- **Permission**: Requires read access to the Intel RAPL `energy_uj` counters
+  under `/sys/class/powercap/intel-rapl*/`, which the kernel exposes root-only
+  (mode `0400`). sysfs does not support POSIX ACLs, so `setfacl` fails with
+  `Operation not supported`; grant access by changing the counters' group and
+  mode instead, and do not make the whole tree world-readable. A udev rule
+  applies the change at boot and device creation, for both package zones and
+  DRAM sub-zones:
+
+  ```bash
+  sudo groupadd --system powercap
+  sudo tee /etc/udev/rules.d/99-powercap.rules <<'EOF'
+  SUBSYSTEM=="powercap", KERNEL=="intel-rapl:*", ACTION=="add", RUN+="/bin/chgrp powercap $sys$devpath/energy_uj", RUN+="/bin/chmod g+r $sys$devpath/energy_uj"
+  EOF
+  sudo udevadm control --reload-rules
+  sudo udevadm trigger --subsystem-match=powercap --action=add
+  ```
+
+  Host users only need membership in the `powercap` group
+  (`sudo usermod -aG powercap "$USER"`).
 
 - **Docker**: Bind-mount powercap read-only and run as a non-root user without
-  additional capabilities. The tracker does not require `--privileged`:
+  additional capabilities. `--user` sets only the primary UID/GID and does not
+  propagate the host user's supplementary groups, so pass the `powercap` GID
+  with `--group-add`. Use the numeric GID, because a group name is resolved
+  against the container's `/etc/group`. The tracker does not require
+  `--privileged`:
 
   ```bash
   docker run --rm \
     --mount type=bind,src=/sys/class/powercap,dst=/sys/class/powercap,readonly \
     --user "$(id -u):$(id -g)" \
+    --group-add "$(getent group powercap | cut -d: -f3)" \
     --cap-drop=ALL \
     --security-opt=no-new-privileges \
     <image> <command>
   ```
 
-  Ensure that this UID/GID has the host-side read/traverse permissions described
-  above; the read-only mount prevents writes but does not override file permissions.
+  The read-only mount only prevents writes; it does not override file
+  permissions, so the container process still needs the host-side `powercap`
+  group access described above.
 
 - **Features**: Tracks total system CPU usage or specific indices (e.g., `CPUDeviceTracker(cpu_id=[0, 1])`).
 - **Temperature**: Uses `psutil.sensors_temperatures()` when the platform exposes CPU thermal sensors.
