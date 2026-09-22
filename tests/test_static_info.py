@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import types
 from typing import cast
@@ -549,8 +550,12 @@ def test_get_host_static_info_linux_handles_unavailable_dmidecode_without_passwo
     }
     assert "dimms" not in dram
     assert "dimms_collection_note" not in dram
-    assert ["dmidecode", "-t", "memory"] in commands
-    assert ["sudo", "-n", "dmidecode", "-t", "memory"] in commands
+    dmidecode = static_info._trusted_system_executable(
+        static_info._TRUSTED_DMIDECODE_PATHS
+    )
+    sudo = static_info._trusted_system_executable(static_info._TRUSTED_SUDO_PATHS)
+    assert [dmidecode, "-t", "memory"] in commands
+    assert [sudo, "-n", dmidecode, "-t", "memory"] in commands
 
 
 def test_read_motherboard_summary_linux_falls_back_to_dmi_sysfs(
@@ -735,9 +740,14 @@ Memory Device
     """
     commands = []
 
+    dmidecode = static_info._trusted_system_executable(
+        static_info._TRUSTED_DMIDECODE_PATHS
+    )
+    sudo = static_info._trusted_system_executable(static_info._TRUSTED_SUDO_PATHS)
+
     def fake_run_command(command):
         commands.append(command)
-        if command == ["sudo", "-n", "dmidecode", "-t", "memory"]:
+        if command == [sudo, "-n", dmidecode, "-t", "memory"]:
             return output
         return None
 
@@ -746,10 +756,41 @@ Memory Device
     dimms = _read_dram_dimms_linux()
 
     assert commands == [
-        ["dmidecode", "-t", "memory"],
-        ["sudo", "-n", "dmidecode", "-t", "memory"],
+        [dmidecode, "-t", "memory"],
+        [sudo, "-n", dmidecode, "-t", "memory"],
     ]
     assert dimms[0]["ram_type"] == "DDR4"
+
+
+def test_read_dmidecode_password_uses_trusted_absolute_commands(monkeypatch) -> None:
+    monkeypatch.setenv("PATH", "/attacker-controlled")
+    commands = []
+    password_commands = []
+    monkeypatch.setattr(
+        static_info,
+        "run_command",
+        lambda command: commands.append(command) or None,
+    )
+    monkeypatch.setattr(
+        static_info,
+        "run_command_with_input",
+        lambda command, input_text, timeout: (
+            password_commands.append((command, input_text, timeout)) or None
+        ),
+    )
+
+    assert (
+        static_info._read_dmidecode_output(["memory"], sudo_password="secret") is None
+    )
+
+    assert all(os.path.isabs(command[0]) for command in commands)
+    password_command, input_text, timeout = password_commands[0]
+    assert all(
+        os.path.isabs(executable)
+        for executable in (password_command[0], password_command[4])
+    )
+    assert input_text == "secret\n"
+    assert timeout == 30
 
 
 def test_calculate_theoretical_bandwidth_gbps() -> None:

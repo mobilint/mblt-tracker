@@ -7,10 +7,10 @@ import re
 import shlex
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 import psutil
 
@@ -19,6 +19,9 @@ from ._types import (
     CollectOutput,
     CpuPowerPolicy,
 )
+
+_TRUSTED_DMIDECODE_PATHS = ("/usr/sbin/dmidecode", "/sbin/dmidecode")
+_TRUSTED_SUDO_PATHS = ("/usr/bin/sudo", "/bin/sudo")
 
 
 def get_host_static_info(
@@ -720,13 +723,16 @@ def _read_dmidecode_output(
     sudo_password: str | None = None,
     sudo_password_provider: Callable[[], str] | None = None,
 ) -> str | None:
-    command = ["dmidecode"]
+    # Never resolve either executable through the caller's PATH: this function
+    # may send an explicitly supplied sudo password to the sudo process.
+    command = [_trusted_system_executable(_TRUSTED_DMIDECODE_PATHS)]
     for dmidecode_type in dmidecode_types:
         command.extend(["-t", dmidecode_type])
     output = run_command(command)
     if output is not None:
         return output
-    output = run_command(["sudo", "-n", *command])
+    sudo = _trusted_system_executable(_TRUSTED_SUDO_PATHS)
+    output = run_command([sudo, "-n", *command])
     if output is not None:
         return output
     if sudo_password is None and sudo_password_provider is not None:
@@ -734,10 +740,20 @@ def _read_dmidecode_output(
     if sudo_password is None:
         return None
     return run_command_with_input(
-        ["sudo", "-S", "-p", "", *command],
+        [sudo, "-S", "-p", "", *command],
         input_text=f"{sudo_password}\n",
         timeout=30,
     )
+
+
+def _trusted_system_executable(candidates: Sequence[str]) -> str:
+    """Return an executable from a fixed set of trusted system paths."""
+    for candidate in candidates:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    # Keep best-effort command execution deterministic when the tool is absent;
+    # the subprocess helper will convert the resulting OSError to ``None``.
+    return candidates[0]
 
 
 def _parse_linux_dmidecode_memory(output: str) -> list[dict[str, object]]:
