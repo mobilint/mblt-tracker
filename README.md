@@ -646,16 +646,21 @@ Uses **pyRAPL** for power measurements and **psutil** for utilization/memory.
   Host users only need membership in the `powercap` group
   (`sudo usermod -aG powercap "$USER"`).
 
-- **Docker**: Bind-mount powercap read-only and run as a non-root user without
-  additional capabilities. `--user` sets only the primary UID/GID and does not
-  propagate the host user's supplementary groups, so pass the `powercap` GID
-  with `--group-add`. Use the numeric GID, because a group name is resolved
-  against the container's `/etc/group`. The tracker does not require
-  `--privileged`:
+- **Docker**: Bind-mount the backing powercap hierarchy read-only at the class
+  lookup path and run as a non-root user without additional capabilities.
+  `/sys/class/powercap` only holds symlinks into
+  `/sys/devices/virtual/powercap`, so binding the class directory alone leaves
+  the targets unreachable on runtimes that mask `/sys/devices`; mounting the
+  backing directory at `/sys/class/powercap` exposes the real
+  `intel-rapl/intel-rapl:N/` tree, which is the path pyRAPL reads. `--user`
+  sets only the primary UID/GID and does not propagate the host user's
+  supplementary groups, so pass the `powercap` GID with `--group-add`. Use the
+  numeric GID, because a group name is resolved against the container's
+  `/etc/group`. The tracker does not require `--privileged`:
 
   ```bash
   docker run --rm \
-    --mount type=bind,src=/sys/class/powercap,dst=/sys/class/powercap,readonly \
+    --mount type=bind,src=/sys/devices/virtual/powercap,dst=/sys/class/powercap,readonly \
     --user "$(id -u):$(id -g)" \
     --group-add "$(getent group powercap | cut -d: -f3)" \
     --cap-drop=ALL \
