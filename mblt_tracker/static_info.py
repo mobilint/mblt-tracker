@@ -5,6 +5,7 @@ import os
 import platform
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -723,37 +724,53 @@ def _read_dmidecode_output(
     sudo_password: str | None = None,
     sudo_password_provider: Callable[[], str] | None = None,
 ) -> str | None:
-    # Never resolve either executable through the caller's PATH: this function
-    # may send an explicitly supplied sudo password to the sudo process.
-    command = [_trusted_system_executable(_TRUSTED_DMIDECODE_PATHS)]
+    dmidecode_args: list[str] = []
     for dmidecode_type in dmidecode_types:
-        command.extend(["-t", dmidecode_type])
-    output = run_command(command)
+        dmidecode_args.extend(["-t", dmidecode_type])
+
+    # The unprivileged attempt sends no credential, so a PATH lookup is an
+    # acceptable fallback for hosts whose binaries live outside the trusted
+    # locations (NixOS, Guix, /usr/local installs, minimal container images).
+    trusted_dmidecode = _trusted_system_executable(_TRUSTED_DMIDECODE_PATHS)
+    dmidecode = trusted_dmidecode or shutil.which("dmidecode")
+    if dmidecode is not None:
+        output = run_command([dmidecode, *dmidecode_args])
+        if output is not None:
+            return output
+
+    # Under sudo, prefer the trusted absolute path. Otherwise pass the bare
+    # name so sudo resolves it through its own ``secure_path`` instead of a
+    # PATH-derived location that would then execute as root.
+    privileged_command = [trusted_dmidecode or "dmidecode", *dmidecode_args]
+    trusted_sudo = _trusted_system_executable(_TRUSTED_SUDO_PATHS)
+    sudo = trusted_sudo or shutil.which("sudo")
+    if sudo is None:
+        return None
+    output = run_command([sudo, "-n", *privileged_command])
     if output is not None:
         return output
-    sudo = _trusted_system_executable(_TRUSTED_SUDO_PATHS)
-    output = run_command([sudo, "-n", *command])
-    if output is not None:
-        return output
+
+    # Never hand a credential to a sudo resolved through the caller's PATH,
+    # and do not ask the provider for one that cannot be used.
+    if trusted_sudo is None:
+        return None
     if sudo_password is None and sudo_password_provider is not None:
         sudo_password = sudo_password_provider()
     if sudo_password is None:
         return None
     return run_command_with_input(
-        [sudo, "-S", "-p", "", *command],
+        [trusted_sudo, "-S", "-p", "", *privileged_command],
         input_text=f"{sudo_password}\n",
         timeout=30,
     )
 
 
-def _trusted_system_executable(candidates: Sequence[str]) -> str:
-    """Return an executable from a fixed set of trusted system paths."""
+def _trusted_system_executable(candidates: Sequence[str]) -> str | None:
+    """Return the first executable among fixed trusted paths, or ``None``."""
     for candidate in candidates:
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
-    # Keep best-effort command execution deterministic when the tool is absent;
-    # the subprocess helper will convert the resulting OSError to ``None``.
-    return candidates[0]
+    return None
 
 
 def _parse_linux_dmidecode_memory(output: str) -> list[dict[str, object]]:

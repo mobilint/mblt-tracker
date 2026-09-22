@@ -773,10 +773,10 @@ Memory Device
     assert dimms[0]["ram_type"] == "DDR4"
 
 
-def test_read_dmidecode_password_uses_trusted_absolute_commands(monkeypatch) -> None:
-    monkeypatch.setenv("PATH", "/attacker-controlled")
-    commands = []
-    password_commands = []
+def _capture_dmidecode_commands(monkeypatch):
+    """Record unprivileged/sudo commands and any password-bearing invocation."""
+    commands: list[list[str]] = []
+    password_commands: list[tuple[list[str], str, int]] = []
     monkeypatch.setattr(
         static_info,
         "run_command",
@@ -789,19 +789,121 @@ def test_read_dmidecode_password_uses_trusted_absolute_commands(monkeypatch) -> 
             password_commands.append((command, input_text, timeout)) or None
         ),
     )
+    return commands, password_commands
+
+
+def _fail_if_called() -> str:
+    raise AssertionError("sudo password provider must not be consulted")
+
+
+def test_read_dmidecode_password_uses_trusted_absolute_commands(monkeypatch) -> None:
+    monkeypatch.setenv("PATH", "/attacker-controlled")
+    _pin_trusted_system_executables(monkeypatch)
+    monkeypatch.setattr(
+        static_info.shutil,
+        "which",
+        lambda name: f"/attacker-controlled/{name}",
+    )
+    commands, password_commands = _capture_dmidecode_commands(monkeypatch)
 
     assert (
         static_info._read_dmidecode_output(["memory"], sudo_password="secret") is None
     )
 
-    assert all(os.path.isabs(command[0]) for command in commands)
-    password_command, input_text, timeout = password_commands[0]
-    assert all(
-        os.path.isabs(executable)
-        for executable in (password_command[0], password_command[4])
+    assert commands == [
+        ["/usr/sbin/dmidecode", "-t", "memory"],
+        ["/usr/bin/sudo", "-n", "/usr/sbin/dmidecode", "-t", "memory"],
+    ]
+    assert password_commands == [
+        (
+            ["/usr/bin/sudo", "-S", "-p", "", "/usr/sbin/dmidecode", "-t", "memory"],
+            "secret\n",
+            30,
+        )
+    ]
+
+
+def test_read_dmidecode_falls_back_to_path_lookup_without_credentials(
+    monkeypatch,
+) -> None:
+    """Non-standard layouts (NixOS, Guix, /usr/local) keep credential-free coverage."""
+    located = {
+        "dmidecode": "/run/current-system/sw/bin/dmidecode",
+        "sudo": "/run/wrappers/bin/sudo",
+    }
+    monkeypatch.setattr(static_info, "_trusted_system_executable", lambda _c: None)
+    monkeypatch.setattr(static_info.shutil, "which", lambda name: located[name])
+    commands, password_commands = _capture_dmidecode_commands(monkeypatch)
+
+    result = static_info._read_dmidecode_output(
+        ["memory"],
+        sudo_password="secret",
+        sudo_password_provider=_fail_if_called,
     )
-    assert input_text == "secret\n"
-    assert timeout == 30
+
+    assert result is None
+    # The unprivileged call may use the PATH-resolved binary; the sudo call must
+    # hand sudo the bare name so its secure_path, not the caller's PATH, wins.
+    assert commands == [
+        ["/run/current-system/sw/bin/dmidecode", "-t", "memory"],
+        ["/run/wrappers/bin/sudo", "-n", "dmidecode", "-t", "memory"],
+    ]
+    # A sudo found only through PATH never receives the credential.
+    assert password_commands == []
+
+
+def test_read_dmidecode_does_not_prompt_when_sudo_is_untrusted(monkeypatch) -> None:
+    monkeypatch.setattr(static_info, "_trusted_system_executable", lambda _c: None)
+    monkeypatch.setattr(static_info.shutil, "which", lambda name: f"/opt/bin/{name}")
+    _, password_commands = _capture_dmidecode_commands(monkeypatch)
+
+    result = static_info._read_dmidecode_output(
+        ["memory"], sudo_password_provider=_fail_if_called
+    )
+
+    assert result is None
+    assert password_commands == []
+
+
+def test_read_dmidecode_passes_bare_name_to_trusted_sudo(monkeypatch) -> None:
+    """Trusted sudo but non-standard dmidecode: credential goes only to trusted sudo."""
+    monkeypatch.setattr(
+        static_info,
+        "_trusted_system_executable",
+        lambda candidates: (
+            "/usr/bin/sudo"
+            if tuple(candidates) == static_info._TRUSTED_SUDO_PATHS
+            else None
+        ),
+    )
+    monkeypatch.setattr(
+        static_info.shutil, "which", lambda name: f"/usr/local/sbin/{name}"
+    )
+    commands, password_commands = _capture_dmidecode_commands(monkeypatch)
+
+    static_info._read_dmidecode_output(["memory"], sudo_password="secret")
+
+    assert commands == [
+        ["/usr/local/sbin/dmidecode", "-t", "memory"],
+        ["/usr/bin/sudo", "-n", "dmidecode", "-t", "memory"],
+    ]
+    assert password_commands == [
+        (["/usr/bin/sudo", "-S", "-p", "", "dmidecode", "-t", "memory"], "secret\n", 30)
+    ]
+
+
+def test_read_dmidecode_returns_none_when_binaries_are_missing(monkeypatch) -> None:
+    monkeypatch.setattr(static_info, "_trusted_system_executable", lambda _c: None)
+    monkeypatch.setattr(static_info.shutil, "which", lambda _name: None)
+    commands, password_commands = _capture_dmidecode_commands(monkeypatch)
+
+    result = static_info._read_dmidecode_output(
+        ["memory"], sudo_password="secret", sudo_password_provider=_fail_if_called
+    )
+
+    assert result is None
+    assert commands == []
+    assert password_commands == []
 
 
 def test_trusted_system_path_candidates_are_absolute() -> None:
@@ -826,15 +928,13 @@ def test_trusted_system_executable_returns_first_usable_candidate(monkeypatch) -
     assert resolved == "/sbin/dmidecode"
 
 
-def test_trusted_system_executable_falls_back_to_absolute_candidate(
-    monkeypatch,
-) -> None:
+def test_trusted_system_executable_returns_none_when_absent(monkeypatch) -> None:
     monkeypatch.setenv("PATH", "/attacker-controlled")
     monkeypatch.setattr(static_info.os.path, "isfile", lambda path: False)
 
-    resolved = static_info._trusted_system_executable(static_info._TRUSTED_SUDO_PATHS)
-
-    assert resolved == "/usr/bin/sudo"
+    assert (
+        static_info._trusted_system_executable(static_info._TRUSTED_SUDO_PATHS) is None
+    )
 
 
 def test_calculate_theoretical_bandwidth_gbps() -> None:
