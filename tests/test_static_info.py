@@ -37,6 +37,23 @@ def _write(path, value: str) -> None:
     path.write_text(value, encoding="utf-8")
 
 
+_PINNED_DMIDECODE = "/usr/sbin/dmidecode"
+_PINNED_SUDO = "/usr/bin/sudo"
+
+
+def _pin_trusted_system_executables(monkeypatch) -> None:
+    """Resolve trusted executables to fixed paths so assertions use literals."""
+    resolved = {
+        static_info._TRUSTED_DMIDECODE_PATHS: _PINNED_DMIDECODE,
+        static_info._TRUSTED_SUDO_PATHS: _PINNED_SUDO,
+    }
+    monkeypatch.setattr(
+        static_info,
+        "_trusted_system_executable",
+        lambda candidates: resolved[tuple(candidates)],
+    )
+
+
 def test_parse_nvcc_cuda_version() -> None:
     output = "Cuda compilation tools, release 12.4, V12.4.131\n"
 
@@ -528,6 +545,7 @@ def test_get_host_static_info_linux_handles_unavailable_dmidecode_without_passwo
     )
     monkeypatch.setattr(static_info, "_get_cuda_version", lambda: None)
     monkeypatch.setattr(static_info, "_get_python_package_version", lambda _name: None)
+    _pin_trusted_system_executables(monkeypatch)
 
     commands = []
 
@@ -550,12 +568,8 @@ def test_get_host_static_info_linux_handles_unavailable_dmidecode_without_passwo
     }
     assert "dimms" not in dram
     assert "dimms_collection_note" not in dram
-    dmidecode = static_info._trusted_system_executable(
-        static_info._TRUSTED_DMIDECODE_PATHS
-    )
-    sudo = static_info._trusted_system_executable(static_info._TRUSTED_SUDO_PATHS)
-    assert [dmidecode, "-t", "memory"] in commands
-    assert [sudo, "-n", dmidecode, "-t", "memory"] in commands
+    assert ["/usr/sbin/dmidecode", "-t", "memory"] in commands
+    assert ["/usr/bin/sudo", "-n", "/usr/sbin/dmidecode", "-t", "memory"] in commands
 
 
 def test_read_motherboard_summary_linux_falls_back_to_dmi_sysfs(
@@ -740,14 +754,11 @@ Memory Device
     """
     commands = []
 
-    dmidecode = static_info._trusted_system_executable(
-        static_info._TRUSTED_DMIDECODE_PATHS
-    )
-    sudo = static_info._trusted_system_executable(static_info._TRUSTED_SUDO_PATHS)
+    _pin_trusted_system_executables(monkeypatch)
 
     def fake_run_command(command):
         commands.append(command)
-        if command == [sudo, "-n", dmidecode, "-t", "memory"]:
+        if command == ["/usr/bin/sudo", "-n", "/usr/sbin/dmidecode", "-t", "memory"]:
             return output
         return None
 
@@ -756,8 +767,8 @@ Memory Device
     dimms = _read_dram_dimms_linux()
 
     assert commands == [
-        [dmidecode, "-t", "memory"],
-        [sudo, "-n", dmidecode, "-t", "memory"],
+        ["/usr/sbin/dmidecode", "-t", "memory"],
+        ["/usr/bin/sudo", "-n", "/usr/sbin/dmidecode", "-t", "memory"],
     ]
     assert dimms[0]["ram_type"] == "DDR4"
 
@@ -791,6 +802,39 @@ def test_read_dmidecode_password_uses_trusted_absolute_commands(monkeypatch) -> 
     )
     assert input_text == "secret\n"
     assert timeout == 30
+
+
+def test_trusted_system_path_candidates_are_absolute() -> None:
+    candidates = (
+        *static_info._TRUSTED_DMIDECODE_PATHS,
+        *static_info._TRUSTED_SUDO_PATHS,
+    )
+    assert candidates
+    assert all(os.path.isabs(candidate) for candidate in candidates)
+
+
+def test_trusted_system_executable_returns_first_usable_candidate(monkeypatch) -> None:
+    monkeypatch.setattr(static_info.os.path, "isfile", lambda path: True)
+    monkeypatch.setattr(
+        static_info.os, "access", lambda path, mode: path == "/sbin/dmidecode"
+    )
+
+    resolved = static_info._trusted_system_executable(
+        static_info._TRUSTED_DMIDECODE_PATHS
+    )
+
+    assert resolved == "/sbin/dmidecode"
+
+
+def test_trusted_system_executable_falls_back_to_absolute_candidate(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("PATH", "/attacker-controlled")
+    monkeypatch.setattr(static_info.os.path, "isfile", lambda path: False)
+
+    resolved = static_info._trusted_system_executable(static_info._TRUSTED_SUDO_PATHS)
+
+    assert resolved == "/usr/bin/sudo"
 
 
 def test_calculate_theoretical_bandwidth_gbps() -> None:

@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 1.0.2
+
+### Fixed
+
+- Prevented optional sudo credentials used for Linux DMI collection from being
+  exposed to executables substituted through an attacker-controlled `PATH`.
+
 ## 1.0.0
 
 ### Changed
@@ -31,8 +38,6 @@
 
 ### Fixed
 
-- Prevented optional sudo credentials used for Linux DMI collection from being
-  exposed to executables substituted through an attacker-controlled `PATH`.
 - Replaced privileged-container CPU telemetry guidance with a least-privilege
   setup: a udev rule that grants a dedicated `powercap` group read access to
   the RAPL `energy_uj` counters, and a Docker example that bind-mounts the
