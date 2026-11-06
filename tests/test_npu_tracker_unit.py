@@ -9,109 +9,160 @@ import mblt_tracker.device_tracker_npu as npu_module
 from mblt_tracker.device_tracker_npu import NPUDeviceTracker
 
 
+class FakeMbltmlError(Exception):
+    pass
+
+
 @dataclass
 class FakeMbltml:
-    MBLTML_DEVICE_ARIES: int = 1
-    MBLTML_DEVICE_REGULUS: int = 2
-    MBLTML_DEVICE_REGULUS_USB: int = 4
-    MBLTML_HARDWARE_VERSION_ARIES: int = 1
-    MBLTML_HARDWARE_VERSION_ARIES2: int = 3
-    MBLTML_HARDWARE_VERSION_REGULUS: int = 2
-    MBLTML_HARDWARE_VERSION_REGULUS2: int = 4
+    """mobilint-ml 1.5 API fake: every device call takes (tdt, dev_no) first.
+
+    The default host has two aries-rb devices. ``set_calls`` records
+    ``(index_within_type, rail_id)`` and ``selected_rail`` is keyed by the same
+    per-type index, which equals the physical ``dev_no`` on a one-type host.
+    """
+
+    MBLTML_DRIVER_ARIES: int = 1
+    MBLTML_DRIVER_REGULUS: int = 2
+    MBLTML_DRIVER_REGULUS_USB: int = 4
+    MBLTML_TARGET_DEVICE_ARIES_RA: int = 1
+    MBLTML_TARGET_DEVICE_REGULUS_RA: int = 2
+    MBLTML_TARGET_DEVICE_ARIES_RB: int = 3
+    MBLTML_TARGET_DEVICE_REGULUS_RB: int = 4
+    MBLTML_TARGET_DEVICE_REGULUS_RA_USB: int = 5
+    MBLTML_TARGET_DEVICE_REGULUS_RB_USB: int = 6
     MBLTML_EXTRA_PMIC_ID_NPU: int = 0
     MBLTML_EXTRA_PMIC_ID_DDR: int = 1
     MBLTML_EXTRA_PMIC_ID_PMIC: int = 2
     MBLTML_EXTRA_PMIC_ID_GOLDFINGER: int = 3
-    init_device_types: set[int] = field(default_factory=set)
+    init_calls: int = 0
+    shutdown_calls: int = 0
+    devices: dict[int, list[str]] = field(
+        default_factory=lambda: {3: ["/dev/aries0", "/dev/aries1"]}
+    )
     selected_rail: dict[int, int] = field(default_factory=lambda: {0: 0, 1: 0})
     set_calls: list[tuple[int, int]] = field(default_factory=list)
 
-    def mbltmlInitDevices(self, device_types):
-        self.init_device_types = device_types
+    def _check(self, tdt, dev_no):
+        if dev_no < 0 or dev_no >= len(self.devices.get(tdt, [])):
+            raise FakeMbltmlError(f"no device ({tdt}, {dev_no})")
+
+    def mbltmlInit(self):
+        self.init_calls += 1
+
+    def mbltmlShutdown(self):
+        self.shutdown_calls += 1
 
     def mbltmlGetDeviceCount(self):
-        return 2
+        return sum(len(nodes) for nodes in self.devices.values())
 
-    def mbltmlGetTotalPower(self, dev_no):
+    def mbltmlGetTargetDeviceCount(self, tdt):
+        return len(self.devices.get(tdt, []))
+
+    def mbltmlGetNodeName(self, tdt, dev_no):
+        self._check(tdt, dev_no)
+        return self.devices[tdt][dev_no]
+
+    def mbltmlGetDriverType(self, tdt, dev_no):
+        self._check(tdt, dev_no)
+        if tdt in (1, 3):  # aries-ra, aries-rb
+            return self.MBLTML_DRIVER_ARIES
+        if tdt in (2, 4):  # regulus-ra, regulus-rb
+            return self.MBLTML_DRIVER_REGULUS
+        return self.MBLTML_DRIVER_REGULUS_USB
+
+    def mbltmlGetTotalPower(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 10.0 + dev_no
 
-    def mbltmlGetTotalCurrent(self, dev_no):
+    def mbltmlGetTotalCurrent(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 1.0 + dev_no
 
-    def mbltmlGetTotalVoltage(self, dev_no):
+    def mbltmlGetTotalVoltage(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 12.0
 
-    def mbltmlGetTotalUtilization(self, dev_no):
+    def mbltmlGetTotalUtilization(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 0.25 + (0.25 * dev_no)
 
-    def mbltmlGetMemoryUsage(self, dev_no):
+    def mbltmlGetMemoryUsage(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return (256 + 256 * dev_no) * 1024 * 1024
 
-    def mbltmlGetMemoryTotal(self, dev_no):
+    def mbltmlGetMemoryTotal(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 1024 * 1024 * 1024
 
-    def mbltmlGetTemperature(self, dev_no):
+    def mbltmlGetTemperature(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 40 + dev_no
 
-    def mbltmlGetNodeName(self, dev_no):
-        return f"aries{dev_no}"
-
-    def mbltmlGetHardwareVersion(self, dev_no):
-        return self.MBLTML_HARDWARE_VERSION_ARIES2
-
-    def mbltmlGetDeviceType(self, dev_no):
-        return self.MBLTML_DEVICE_ARIES
-
-    def mbltmlSetExtraPmicID(self, dev_no, rail_id):
+    def mbltmlSetExtraPmicID(self, tdt, dev_no, rail_id):
+        self._check(tdt, dev_no)
         self.selected_rail[dev_no] = rail_id
         self.set_calls.append((dev_no, rail_id))
 
-    def mbltmlGetExtraPmicPower(self, dev_no):
+    def mbltmlGetExtraPmicPower(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         rail = self.selected_rail[dev_no]
         return {0: 2.0, 1: 3.0, 2: 4.0, 3: 5.0}[rail] + dev_no
 
-    def mbltmlGetExtraPmicCurrent(self, dev_no):
+    def mbltmlGetExtraPmicCurrent(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         rail = self.selected_rail[dev_no]
         return {0: 0.2, 1: 0.3, 2: 0.4, 3: 0.5}[rail] + dev_no
 
-    def mbltmlGetExtraPmicVoltage(self, dev_no):
+    def mbltmlGetExtraPmicVoltage(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 12.0
 
-    def mbltmlGetDriverVersion(self, device_type):
+    def mbltmlGetDriverVersion(self, driver_type):
         return {
-            self.MBLTML_DEVICE_ARIES: "1.2.3",
-            self.MBLTML_DEVICE_REGULUS: "4.5.6",
-            self.MBLTML_DEVICE_REGULUS_USB: "7.8.9",
-        }[device_type]
+            self.MBLTML_DRIVER_ARIES: "1.2.3",
+            self.MBLTML_DRIVER_REGULUS: "4.5.6",
+            self.MBLTML_DRIVER_REGULUS_USB: "7.8.9",
+        }[driver_type]
 
-    def mbltmlGetFirmwareVersion(self, dev_no):
+    def mbltmlGetFirmwareVersion(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return "2.0.1"
 
-    def mbltmlGetFirmwareRevision(self, dev_no):
+    def mbltmlGetFirmwareRevision(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 7
 
-    def mbltmlGetVendorId(self, dev_no):
+    def mbltmlGetVendorId(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 0x209F
 
-    def mbltmlGetDeviceId(self, dev_no):
+    def mbltmlGetDeviceId(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 0
 
-    def mbltmlGetSubVendorId(self, dev_no):
+    def mbltmlGetSubVendorId(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 0x402
 
-    def mbltmlGetSubDeviceId(self, dev_no):
+    def mbltmlGetSubDeviceId(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 0x108B
 
-    def mbltmlGetPcieGen(self, dev_no):
+    def mbltmlGetPcieGen(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 4
 
-    def mbltmlGetPcieLanes(self, dev_no):
+    def mbltmlGetPcieLanes(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 8
 
-    def mbltmlGetPcieRev(self, dev_no):
+    def mbltmlGetPcieRev(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 2
 
-    def mbltmlGetPcieClassCode(self, dev_no):
+    def mbltmlGetPcieClassCode(self, tdt, dev_no):
+        self._check(tdt, dev_no)
         return 0x7800002
 
 
@@ -130,11 +181,7 @@ def test_npu_default_sampling_selects_npu_and_waits_for_refresh(
 
     tracker._func_for_sched()
 
-    assert fake_mbltml.init_device_types == {
-        fake_mbltml.MBLTML_DEVICE_ARIES,
-        fake_mbltml.MBLTML_DEVICE_REGULUS,
-        fake_mbltml.MBLTML_DEVICE_REGULUS_USB,
-    }
+    assert fake_mbltml.init_calls == 1
     assert fake_mbltml.set_calls == [
         (0, fake_mbltml.MBLTML_EXTRA_PMIC_ID_NPU),
         (1, fake_mbltml.MBLTML_EXTRA_PMIC_ID_NPU),
@@ -156,7 +203,9 @@ def test_npu_default_sampling_selects_npu_and_waits_for_refresh(
     assert metrics["avg_memory_used_pct"] == 37.5
     assert metrics["memory_total_mb"] == 2048.0
     assert metrics["total_memory_mb"] == 2048.0
-    assert metrics["devices"][0]["node_name"] == "aries0"
+    assert metrics["devices"][0]["node_name"] == "/dev/aries0"
+    assert metrics["devices"][0]["hardware_version"] == "Aries2"
+    assert metrics["devices"][0]["target_device_type"] == "aries-rb"
     assert metrics["rail_metrics"] == {
         "selected": ["npu"],
         "firmware_refresh_period_s": 1.0,
@@ -196,12 +245,12 @@ def test_npu_aggregate_memory_usage_pct_uses_summed_usage_and_capacity(
     monkeypatch.setattr(
         fake_mbltml,
         "mbltmlGetMemoryUsage",
-        lambda dev_no: memory_usage_mb[dev_no] * 1024 * 1024,
+        lambda tdt, dev_no: memory_usage_mb[dev_no] * 1024 * 1024,
     )
     monkeypatch.setattr(
         fake_mbltml,
         "mbltmlGetMemoryTotal",
-        lambda dev_no: memory_total_mb[dev_no] * 1024 * 1024,
+        lambda tdt, dev_no: memory_total_mb[dev_no] * 1024 * 1024,
     )
     monkeypatch.setattr(npu_module.time, "time", lambda: 100.0)
     tracker = NPUDeviceTracker(interval=0.1)
@@ -293,10 +342,10 @@ def test_failed_extra_rail_selection_does_not_leave_pending_state(
     now = 100.0
     original_set_extra_pmic_id = fake_mbltml.mbltmlSetExtraPmicID
 
-    def fail_ddr_on_second_device(dev_no, rail_id):
+    def fail_ddr_on_second_device(tdt, dev_no, rail_id):
         if dev_no == 1 and rail_id == fake_mbltml.MBLTML_EXTRA_PMIC_ID_DDR:
             raise RuntimeError("unsupported rail")
-        original_set_extra_pmic_id(dev_no, rail_id)
+        original_set_extra_pmic_id(tdt, dev_no, rail_id)
 
     monkeypatch.setattr(fake_mbltml, "mbltmlSetExtraPmicID", fail_ddr_on_second_device)
     monkeypatch.setattr(npu_module.time, "time", lambda: now)
@@ -482,10 +531,10 @@ def test_all_rail_sampling_skips_unavailable_goldfinger(
 ):
     original_set_extra_pmic_id = fake_mbltml.mbltmlSetExtraPmicID
 
-    def fail_goldfinger(dev_no, rail_id):
+    def fail_goldfinger(tdt, dev_no, rail_id):
         if rail_id == fake_mbltml.MBLTML_EXTRA_PMIC_ID_GOLDFINGER:
             raise RuntimeError("unsupported rail")
-        original_set_extra_pmic_id(dev_no, rail_id)
+        original_set_extra_pmic_id(tdt, dev_no, rail_id)
 
     monkeypatch.setattr(fake_mbltml, "mbltmlSetExtraPmicID", fail_goldfinger)
     now = 100.0
@@ -555,8 +604,9 @@ def test_get_static_info_merges_mbltml_metadata(fake_mbltml, monkeypatch):
     assert info["hardware"]["npus"][0] == {
         "dev_no": 0,
         "vendor_id": "0x209f",
-        "node_name": "aries0",
+        "node_name": "/dev/aries0",
         "device_type": "Aries",
+        "target_device_type": "aries-rb",
         "hardware_version": "Aries2",
         "firmware": {"version": "2.0.1", "revision": "7"},
         "device_id": "0x0",
@@ -642,7 +692,7 @@ def test_get_static_info_enriches_before_selected_npu_filter(
     npu = tracker.get_static_info()["hardware"]["npus"][0]
 
     assert npu["dev_no"] == 1
-    assert npu["node_name"] == "aries1"
+    assert npu["node_name"] == "/dev/aries1"
     assert npu["current_link_speed"] == "16.0 GT/s PCIe"
     assert npu["current_link_width"] == "8"
 
@@ -660,8 +710,9 @@ def test_get_static_info_limits_mbltml_metadata_to_selected_npu(
     assert info["hardware"]["npus"] == [
         {
             "dev_no": 1,
-            "node_name": "aries1",
+            "node_name": "/dev/aries1",
             "device_type": "Aries",
+            "target_device_type": "aries-rb",
             "hardware_version": "Aries2",
             "firmware": {"version": "2.0.1", "revision": "7"},
             "vendor_id": "0x209f",
@@ -689,3 +740,130 @@ def test_get_static_info_ignores_legacy_pcie_filter_env_vars(
     info = tracker.get_static_info()
 
     assert [npu["dev_no"] for npu in info["hardware"]["npus"]] == [0, 1]
+
+
+def test_physical_dev_no_follows_mbltml_enumeration_across_target_types(
+    monkeypatch,
+) -> None:
+    fake = FakeMbltml(
+        devices={
+            # Per-type lists, deliberately not in system enumeration order.
+            6: ["/dev/regulus-usb0"],
+            2: ["/dev/regulus-npu0"],
+            1: ["/dev/aries1"],
+            3: ["/dev/aries0", "/dev/aries2"],
+        },
+        selected_rail={0: 0, 1: 0},
+    )
+    monkeypatch.setattr(npu_module, "mbltml", fake)
+
+    devices = npu_module._discover_devices()
+
+    assert [(d.node_name, d.target_device_type, d.index) for d in devices] == [
+        ("/dev/aries0", 3, 0),
+        ("/dev/aries1", 1, 0),
+        ("/dev/aries2", 3, 1),
+        ("/dev/regulus-npu0", 2, 0),
+        ("/dev/regulus-usb0", 6, 0),
+    ]
+    assert [d.hardware_version for d in devices] == [
+        "Aries2",
+        "Aries",
+        "Aries2",
+        "Regulus",
+        "Regulus2",
+    ]
+
+
+def test_selected_dev_no_routes_calls_to_its_target_type_and_index(
+    monkeypatch,
+) -> None:
+    fake = FakeMbltml(
+        devices={1: ["/dev/aries1"], 3: ["/dev/aries0", "/dev/aries2"]},
+        selected_rail={0: 0, 1: 0},
+    )
+    set_calls: list[tuple[int, int, int]] = []
+
+    def record_set(tdt, dev_no, rail_id):
+        set_calls.append((tdt, dev_no, rail_id))
+
+    monkeypatch.setattr(fake, "mbltmlSetExtraPmicID", record_set)
+    monkeypatch.setattr(npu_module, "mbltml", fake)
+    monkeypatch.setattr(npu_module.time, "time", lambda: 100.0)
+
+    # Physical dev_no 2 is /dev/aries2, the second aries-rb device.
+    tracker = NPUDeviceTracker(interval=0.1, npu_id=2)
+    tracker._func_for_sched()
+    tracker._restore_npu_rail_selection()
+
+    assert tracker.get_trace() == [(100.0, 11.0)]
+    assert list(tracker.get_metric()["devices"]) == [2]
+    assert tracker.get_metric()["devices"][2]["node_name"] == "/dev/aries2"
+    assert set_calls == [
+        (fake.MBLTML_TARGET_DEVICE_ARIES_RB, 1, fake.MBLTML_EXTRA_PMIC_ID_NPU),
+        (fake.MBLTML_TARGET_DEVICE_ARIES_RB, 1, fake.MBLTML_EXTRA_PMIC_ID_NPU),
+    ]
+    with pytest.raises(ValueError, match="Invalid NPU ID"):
+        NPUDeviceTracker(npu_id=3)
+
+
+def test_static_info_numbers_mixed_target_types_by_physical_dev_no(
+    monkeypatch,
+) -> None:
+    fake = FakeMbltml(devices={1: ["/dev/aries1"], 3: ["/dev/aries0"]})
+    monkeypatch.setattr(npu_module, "mbltml", fake)
+
+    npus = npu_module._get_mbltml_static_info()["hardware"]["npus"]
+
+    assert [
+        (npu["dev_no"], npu["node_name"], npu["target_device_type"]) for npu in npus
+    ] == [(0, "/dev/aries0", "aries-rb"), (1, "/dev/aries1", "aries-ra")]
+
+
+def test_mbltml_is_initialized_once_per_module(fake_mbltml) -> None:
+    NPUDeviceTracker(interval=0.1)
+    NPUDeviceTracker(interval=0.1, npu_id=1).get_static_info()
+
+    assert fake_mbltml.init_calls == 1
+
+
+def test_legacy_mbltml_api_is_rejected_with_install_hint(monkeypatch) -> None:
+    class LegacyMbltml:
+        def mbltmlInit(self):
+            raise AssertionError("legacy module must not be initialized")
+
+        def mbltmlGetDeviceCount(self):
+            return 1
+
+    monkeypatch.setattr(npu_module, "mbltml", LegacyMbltml())
+
+    with pytest.raises(RuntimeError, match="mobilint-ml"):
+        NPUDeviceTracker(interval=0.1)
+    assert npu_module._get_mbltml_static_info() == {}
+
+
+def test_no_addressable_devices_raises(monkeypatch) -> None:
+    monkeypatch.setattr(npu_module, "mbltml", FakeMbltml(devices={}))
+
+    with pytest.raises(RuntimeError, match="No Mobilint NPU devices"):
+        NPUDeviceTracker(interval=0.1)
+
+
+def test_mbltml_shutdown_is_registered_for_interpreter_exit(monkeypatch) -> None:
+    fake = FakeMbltml()
+    registered = []
+    monkeypatch.setattr(npu_module, "mbltml", fake)
+    monkeypatch.setattr(
+        npu_module.atexit, "register", lambda *args: registered.append(args)
+    )
+
+    NPUDeviceTracker(interval=0.1)
+    NPUDeviceTracker(interval=0.1)
+
+    assert registered == [(npu_module._shutdown_mbltml, fake)]
+    npu_module._shutdown_mbltml(fake)
+    npu_module._shutdown_mbltml(fake)
+    assert fake.shutdown_calls == 1
+
+    NPUDeviceTracker(interval=0.1)
+    assert fake.init_calls == 2

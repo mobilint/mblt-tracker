@@ -36,12 +36,9 @@ tqdm = tqdm_module.tqdm
 def _expected_available_all_mode_rails() -> list[str]:
     """Return all-mode rails expected to be available on the current device."""
     rails = ["npu", "ddr", "pmic"]
-    device_count = mbltml.mbltmlGetDeviceCount()
-    aries_type = getattr(mbltml, "MBLTML_DEVICE_ARIES", None)
     aries_devices = sum(
-        1
-        for dev_no in range(device_count)
-        if mbltml.mbltmlGetDeviceType(dev_no) == aries_type
+        mbltml.mbltmlGetTargetDeviceCount(getattr(mbltml, name))
+        for name in ("MBLTML_TARGET_DEVICE_ARIES_RA", "MBLTML_TARGET_DEVICE_ARIES_RB")
     )
     if aries_devices >= 4:
         rails.append("goldfinger")

@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## 2.0.0
+
+### Changed
+
+- **Breaking:** The NPU backend now depends on `mobilint-ml` (`>=1.5.3,<2`)
+  instead of the legacy `mbltml` 0.0.0 package. `mobilint-ml` still provides
+  the `mbltml` module but changed its API: every device call now takes a target
+  device type (for example `aries-rb`) plus an index within that type. The
+  tracker raises a clear error if the legacy module is installed. Both packages
+  install the same `mbltml` module, so run `pip uninstall mbltml` before
+  upgrading. With `mobilint-ml` installed, `mblt-tracker` 1.x constructed an
+  `NPUDeviceTracker` but reported `None` for every NPU metric.
+- Kept the physical NPU `dev_no` namespace. The tracker discovers devices per
+  target device type and numbers them in mbltml's system-wide enumeration
+  order (ARIES, REGULUS, then REGULUS USB nodes, each by node number), so
+  `npu_id`, `metrics["devices"]` keys, and static `dev_no` values match 1.x on
+  single-type hosts.
+- `mbltml` is initialized once per process. Re-initializing reopens every
+  device node, which was unsafe while another tracker sampled on its scheduler
+  thread, for example during `get_static_info()` of a running tracker.
+  The tracker also calls `mbltmlShutdown()` at interpreter exit, which avoids
+  a mobilint-ml 1.5.3 crash at process exit on Windows hosts with an ARIES
+  card.
+
+### Added
+
+- NPU static entries and per-device metric summaries report
+  `target_device_type` (`aries-ra`, `aries-rb`, `regulus-ra`, `regulus-rb`,
+  `regulus-ra-usb`, or `regulus-rb-usb`). `hardware_version` keeps its 1.x
+  labels (`Aries`, `Aries2`, `Regulus`, `Regulus2`), derived from the target
+  device type.
+- Linux aarch64 installs, such as NVIDIA Jetson with a Mobilint PCIe card, no
+  longer need `pip install --no-deps`.
+
 ## 1.1.0
 
 ### Added
