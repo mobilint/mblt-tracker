@@ -49,6 +49,17 @@ cd mblt-tracker
 pip install -e .
 ```
 
+The Mobilint NPU backend depends on `mobilint-ml`, which provides the `mbltml`
+module and publishes wheels for Linux x86_64, Linux aarch64, and Windows x64.
+`mblt-tracker` 2.0.0 and later no longer work with the legacy `mbltml` PyPI
+package (0.0.0). Both packages install the same `mbltml` module, so remove the
+legacy package before upgrading an existing environment:
+
+```bash
+pip uninstall -y mbltml
+pip install -U mblt-tracker
+```
+
 ---
 
 ## 📖 Quick Start Guide
@@ -728,12 +739,10 @@ GPUs do not report power or utilization through NVML, so use
   tree model name, the L4T release, every discovered rail label
   (`power_rails`), and the rails summed into total power
   (`power_total_rails`).
-- **Installation**: `mblt-tracker` still depends on `mbltml`, which publishes
-  no aarch64 wheel. On Jetson, install it with
-  `pip install --no-deps mblt-tracker` and add `numpy`, `apscheduler`,
-  `psutil`, `pyRAPL`, `nvidia-ml-py`, and `setuptools`; `mblt_tracker` import
-  also needs an importable `mbltml` module until the NPU backend moves to
-  `mobilint-ml`.
+- **Installation**: `pip install mblt-tracker` works on Jetson; every runtime
+  dependency, including `mobilint-ml`, publishes an aarch64 wheel. A Jetson
+  with a Mobilint PCIe card can run `JetsonDeviceTracker` and
+  `NPUDeviceTracker` side by side.
 
 ### Host DRAM
 
@@ -748,15 +757,16 @@ Uses the **Intel RAPL DRAM domain** through `pyRAPL` for host DRAM power measure
 
 ### Mobilint NPU
 
-Uses **mbltml** for OS-independent Mobilint NPU telemetry on Linux and Windows.
+Uses **mbltml**, provided by the `mobilint-ml` package, for OS-independent Mobilint NPU telemetry on Linux and Windows.
 
-- **Platform**: Supports Linux and Windows when the Mobilint driver and `mbltml` runtime library are available.
-- **Device Selection**: Tracks all detected physical `mbltml` device indices by default, or selected indices with `NPUDeviceTracker(npu_id=0)` / `NPUDeviceTracker(npu_id=[0, 1])`.
+- **Platform**: Supports Linux (x86_64 and aarch64) and Windows when the Mobilint driver is installed. Requires `mobilint-ml` 1.5.3 or later; the legacy `mbltml` 0.0.0 package is rejected with an install hint.
+- **Device Selection**: Tracks all detected NPUs by default, or selected physical device indices with `NPUDeviceTracker(npu_id=0)` / `NPUDeviceTracker(npu_id=[0, 1])`.
+- **Device Numbering**: `mobilint-ml` addresses a device by target device type (for example `aries-rb`) plus an index within that type. The tracker keeps one system-wide physical `dev_no` instead, numbered in mbltml's own enumeration order: ARIES nodes, then REGULUS, then REGULUS USB, each by node number (`/dev/aries0`, `/dev/aries1`, ...). On a host with one NPU type, `dev_no` equals the per-type index and matches the pre-2.0 numbering.
 - **Default Rail Policy**: The default `rail_metrics="npu"` mode reads total device power, total utilization, memory usage, and temperature on every tick. It explicitly selects the NPU Extra PMIC rail with `mbltmlSetExtraPmicID()` on the first tick and records NPU rail power/current/voltage only after the firmware refresh delay has elapsed, avoiding stale rail values left by a previous tracker process.
 - **Shared Rail Register Limitation**: NPU, DDR, PMIC, and GoldFinger rail power/current/voltage readings share the same firmware register mapping. The tracker does not assume the firmware register initially points to the NPU rail. Selecting any rail with `mbltmlSetExtraPmicID()` may take up to about 1 second to refresh the register value.
 - **Extra Rail Monitoring**: Set `rail_metrics="all"` or a list such as `rail_metrics=["npu", "ddr"]` to opt into DDR/PMIC/GoldFinger rail telemetry. Selected rails, including NPU, are sampled by a single non-blocking rail cycle in `rail_metrics` order, so their effective sampling rate can be lower than `interval`; samples are recorded only after the firmware refresh delay has elapsed.
 - **Metric Naming**: Rail-specific measurements use explicit names such as `avg_npu_rail_power_w`, `avg_ddr_rail_current_a`, and `avg_goldfinger_rail_voltage_v` to distinguish PMIC rail telemetry from total device power.
-- **Static Info**: Uses `mbltml` as the NPU source of truth for device discovery, `dev_no`, driver, firmware, device type, hardware version, and memory metadata. OS PCIe discovery may enrich NPU entries with link speed/width, status, and descriptive fields, but it is never used as a fallback NPU discovery path.
+- **Static Info**: Uses `mbltml` as the NPU source of truth for device discovery, `dev_no`, driver, firmware, device type, target device type, hardware version, and memory metadata. OS PCIe discovery may enrich NPU entries with link speed/width, status, and descriptive fields, but it is never used as a fallback NPU discovery path.
 
 ---
 
@@ -791,7 +801,7 @@ Tracker-specific fields may also be present:
 - **CPU**: `cpu` contains per-socket statistics keyed by socket ID.
 - **GPU**: `gpu` contains per-GPU statistics keyed by GPU index. GPU-specific summary keys include `avg_gpu_util_pct`, `p99_gpu_util_pct`, `max_gpu_util_pct`, `avg_mem_util_pct`, and `p99_mem_util_pct`.
 - **DRAM**: DRAM-specific power keys include `avg_dram_power_w`, `p99_dram_power_w`, and `max_dram_power_w`. `dram` contains per-socket statistics keyed by socket ID.
-- **NPU**: NPU-specific keys include total device telemetry (`avg_total_power_w`, `avg_total_current_a`, `avg_total_voltage_v`), utilization (`avg_total_utilization_pct`), memory (`avg_memory_usage_mb`, `memory_total_mb`, `avg_memory_usage_pct`), temperature, and rail-specific telemetry (`avg_npu_rail_power_w`, `avg_ddr_rail_power_w`, `avg_pmic_rail_power_w`, `avg_goldfinger_rail_power_w`, plus matching current/voltage keys when available). For compatibility with CPU/GPU consumers, NPU total telemetry is also exposed through standardized aliases such as `avg_power_w`, `avg_utilization_pct`, `avg_memory_used_mb`, and `total_memory_mb`. `devices` contains per-`mbltml` device statistics keyed by device index. `rail_metrics` documents the selected rails and the 1-second firmware refresh limitation for extra rails.
+- **NPU**: NPU-specific keys include total device telemetry (`avg_total_power_w`, `avg_total_current_a`, `avg_total_voltage_v`), utilization (`avg_total_utilization_pct`), memory (`avg_memory_usage_mb`, `memory_total_mb`, `avg_memory_usage_pct`), temperature, and rail-specific telemetry (`avg_npu_rail_power_w`, `avg_ddr_rail_power_w`, `avg_pmic_rail_power_w`, `avg_goldfinger_rail_power_w`, plus matching current/voltage keys when available). For compatibility with CPU/GPU consumers, NPU total telemetry is also exposed through standardized aliases such as `avg_power_w`, `avg_utilization_pct`, `avg_memory_used_mb`, and `total_memory_mb`. `devices` contains per-device statistics keyed by physical `dev_no`, with `node_name`, `hardware_version`, and `target_device_type` metadata. `rail_metrics` documents the selected rails and the 1-second firmware refresh limitation for extra rails.
 
 ### Time-Series Trace APIs
 
@@ -837,7 +847,7 @@ Typical fields include:
 - `inference.cpu`: OS-independent CPU power policy object. Linux fills `governor`; Windows fills `power_plan`, `min_processor_state_pct`, and `max_processor_state_pct`. Unavailable OS-specific attributes are kept as `null`.
 - `hardware.gpu`: `GPUDeviceTracker.get_static_info()` output with `device_count` and a `devices` list containing tracked GPU indices and names
 - `hardware.gpus`: `mblt-tracker collect` output containing NVML-discovered NVIDIA GPU devices. For NVIDIA GPUs, current and maximum PCIe link generation/width fields are sourced from NVML; OS PCIe discovery may add non-link fields such as vendor/device IDs and descriptive metadata where available. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
-- `hardware.npus`: Mobilint NPU devices discovered through `mbltml`. The `dev_no` field is the physical `mbltml` runtime device index, and entries may include vendor/device IDs, node name, device type, hardware version, memory metadata, firmware metadata, and PCIe link/status/descriptive enrichment where available. OS PCIe discovery never creates NPU entries by itself. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
+- `hardware.npus`: Mobilint NPU devices discovered through `mbltml`. The `dev_no` field is the physical `mbltml` runtime device index, and entries may include vendor/device IDs, node name, device type (driver family), target device type (for example `aries-rb`), hardware version, memory metadata, firmware metadata, and PCIe link/status/descriptive enrichment where available. OS PCIe discovery never creates NPU entries by itself. Private PCIe instance identifiers such as `bus_address` and `pnp_device_id` are omitted from public output.
 - `inference.gpu`: NVIDIA driver and CUDA driver versions. The CLI normalizes the CUDA driver version as a string such as `"13.0"`; `GPUDeviceTracker.get_static_info()` returns the raw NVML CUDA driver integer.
 - `hardware.npus[].firmware`: per-NPU firmware metadata where available. Firmware metadata is collected through `mbltml` when available.
 - `inference.npu_driver_version`: host Mobilint NPU driver version when available. Driver metadata is collected through `mbltml` when available.

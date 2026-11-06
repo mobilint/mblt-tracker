@@ -18,8 +18,8 @@ the same change and run the synchronization checks before finishing.
 - `mblt_tracker/device_tracker_gpu.py`: NVIDIA NVML discovery and telemetry.
 - `mblt_tracker/device_tracker_jetson.py`: NVIDIA Jetson INA3221 rail power,
   integrated GPU load, shared memory, and GPU thermal-zone telemetry via sysfs.
-- `mblt_tracker/device_tracker_npu.py`: `mbltml` discovery, telemetry, rail
-  state machine, and NPU static metadata.
+- `mblt_tracker/device_tracker_npu.py`: `mbltml` (from the `mobilint-ml`
+  package) discovery, telemetry, rail state machine, and NPU static metadata.
 - `mblt_tracker/static_info.py`: Linux/Windows host, OS, DRAM, motherboard,
   PCIe, NVML, driver, firmware, merge, schema-cleaning, and sanitization logic.
 - `mblt_tracker/cli.py`: `mblt-tracker collect` orchestration and JSON output.
@@ -63,9 +63,14 @@ as unavailable. Return copies of trace lists, not internal mutable storage.
   a partial sum. GPU load, GPU temperature, and shared system memory are best
   effort. NVML reports no Jetson power or utilization, so do not route Jetson
   through the GPU backend.
-- NPU uses physical `mbltml` device indices for discovery, selection,
-  per-device metrics, and static identity. Never renumber a selected subset.
-  Total device telemetry is separate from extra-PMIC rail telemetry.
+- NPU uses physical `dev_no` indices for discovery, selection, per-device
+  metrics, and static identity. Never renumber a selected subset.
+  `mobilint-ml` addresses a device by target device type plus a per-type
+  index; the tracker maps each `dev_no` to that pair and numbers devices in
+  mbltml's system-wide enumeration order (ARIES, REGULUS, then REGULUS USB
+  nodes, each by node number). Do not expose the per-type index as `dev_no`.
+  Initialize `mbltml` once per process. Total device telemetry is separate
+  from extra-PMIC rail telemetry.
 
 Keep standardized aggregate aliases stable across backends:
 `*_power_w`, `*_utilization_pct`, `*_memory_used_mb`,

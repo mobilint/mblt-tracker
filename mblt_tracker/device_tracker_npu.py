@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import atexit
 import logging
+import math
+import re
+import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 
 import mbltml
@@ -22,9 +27,49 @@ _EXTRA_RAIL_REFRESH_PERIOD_S = 1.0
 _DEFAULT_RAIL_METRICS = "npu"
 _RAIL_ORDER = ("npu", "ddr", "pmic", "goldfinger")
 
+# mobilint-ml 1.5 addresses a device by (target device type, index within that
+# type). Each entry maps a target-device-type constant to its public name and to
+# the hardware-version label of the pre-1.5 ``mbltml`` API (ARIES == aries-ra,
+# ARIES2 == aries-rb, REGULUS == regulus-ra, REGULUS2 == regulus-rb).
+_TARGET_DEVICE_TYPES = (
+    ("MBLTML_TARGET_DEVICE_ARIES_RA", "aries-ra", "Aries"),
+    ("MBLTML_TARGET_DEVICE_ARIES_RB", "aries-rb", "Aries2"),
+    ("MBLTML_TARGET_DEVICE_REGULUS_RA", "regulus-ra", "Regulus"),
+    ("MBLTML_TARGET_DEVICE_REGULUS_RB", "regulus-rb", "Regulus2"),
+    ("MBLTML_TARGET_DEVICE_REGULUS_RA_USB", "regulus-ra-usb", "Regulus"),
+    ("MBLTML_TARGET_DEVICE_REGULUS_RB_USB", "regulus-rb-usb", "Regulus2"),
+)
+# Node families in the order mbltml opens them. mbltml numbers its system-wide
+# device list in this order, then by node number within a family.
+_NODE_FAMILY_ORDER = ("/dev/aries", "/dev/regulus-npu", "/dev/regulus-usb")
+_NODE_NAME_PATTERN = re.compile(r"^(.*?)(\d+)$")
+_INIT_LOCK = threading.Lock()
+_initialized_module: object | None = None
+
+
+@dataclass(frozen=True)
+class _NpuHandle:
+    """Address of one NPU in the mobilint-ml per-target-device-type API."""
+
+    target_device_type: int
+    target_device_type_name: str
+    index: int
+    node_name: str | None
+    hardware_version: str
+    type_rank: int
+
+    def call(self, func: Callable[..., Any], *args: Any) -> Any:
+        return _safe_call(func, self.target_device_type, self.index, *args)
+
 
 class NPUDeviceTracker(BaseDeviceTracker):
     """Track Mobilint NPU metrics through the OS-independent ``mbltml`` API.
+
+    ``mbltml`` is provided by the ``mobilint-ml`` package, whose API addresses a
+    device by target device type plus an index within that type. The tracker
+    keeps one system-wide physical ``dev_no`` namespace instead: devices are
+    numbered in mbltml's own enumeration order (node family, then node number),
+    which is the device index of the pre-1.5 ``mbltml`` API.
 
     The default path reads total power, utilization, memory, and temperature on
     every tick. The NPU extra-PMIC rail is selected explicitly on the first tick
@@ -49,8 +94,8 @@ class NPUDeviceTracker(BaseDeviceTracker):
 
         Args:
             interval: Polling interval in seconds.
-            npu_id: Physical ``mbltml`` device indices to track. If ``None``,
-                all detected devices are tracked.
+            npu_id: Physical NPU device indices (``dev_no``) to track. If
+                ``None``, all detected devices are tracked.
             rail_metrics: Extra PMIC rails to monitor. ``"npu"`` is the
                 default. ``"all"`` enables ``npu``, ``ddr``, ``pmic``, and
                 ``goldfinger``. Extra PMIC rails require a firmware register
@@ -63,7 +108,8 @@ class NPUDeviceTracker(BaseDeviceTracker):
         self._npu_id = _normalize_npu_ids(npu_id)
         self._rail_metrics = _normalize_rail_metrics(rail_metrics)
         self._job_id = "npu_device_track"
-        self._device_count = _safe_call(mbltml.mbltmlGetDeviceCount, default=0)
+        self._devices = _discover_devices()
+        self._device_count = len(self._devices)
         if self._device_count <= 0:
             raise RuntimeError("No Mobilint NPU devices were detected by mbltml")
         invalid_ids = [i for i in self._npu_id or [] if i >= self._device_count]
@@ -148,7 +194,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
         changed_devices: list[int] = []
         for dev_no in selected_devices:
             if self._selected_rail.get(dev_no) != rail:
-                if _set_extra_rail(dev_no, rail):
+                if _set_extra_rail(self._devices[dev_no], dev_no, rail):
                     self._selected_rail[dev_no] = rail
                     self._rail_selected_at[dev_no] = now
                     changed_devices.append(dev_no)
@@ -159,7 +205,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
 
     def _rollback_devices_to_npu_rail(self, dev_nos: list[int], now: float) -> None:
         for dev_no in dev_nos:
-            if _set_extra_rail(dev_no, "npu"):
+            if _set_extra_rail(self._devices[dev_no], dev_no, "npu"):
                 self._selected_rail[dev_no] = "npu"
                 self._rail_selected_at[dev_no] = now
 
@@ -172,40 +218,38 @@ class NPUDeviceTracker(BaseDeviceTracker):
     def _read_device_sample(
         self, dev_no: int, extra_rail_to_read: str | None, now: float
     ) -> dict[str, Any] | None:
-        total_power_w = _safe_call(mbltml.mbltmlGetTotalPower, dev_no)
+        device = self._devices[dev_no]
+        total_power_w = device.call(mbltml.mbltmlGetTotalPower)
         if total_power_w is None:
             return None
-        memory_usage_bytes = _safe_call(mbltml.mbltmlGetMemoryUsage, dev_no)
-        memory_total_bytes = _safe_call(mbltml.mbltmlGetMemoryTotal, dev_no)
-        memory_usage_mb = _bytes_to_mb(memory_usage_bytes)
-        memory_total_mb = _bytes_to_mb(memory_total_bytes)
+        memory_usage_mb = _bytes_to_mb(device.call(mbltml.mbltmlGetMemoryUsage))
+        memory_total_mb = _bytes_to_mb(device.call(mbltml.mbltmlGetMemoryTotal))
         sample: dict[str, Any] = {
             "dev_no": dev_no,
             "total_power_w": float(total_power_w),
-            "total_current_a": _safe_call(mbltml.mbltmlGetTotalCurrent, dev_no),
-            "total_voltage_v": _safe_call(mbltml.mbltmlGetTotalVoltage, dev_no),
+            "total_current_a": device.call(mbltml.mbltmlGetTotalCurrent),
+            "total_voltage_v": device.call(mbltml.mbltmlGetTotalVoltage),
             "total_utilization_pct": _normalize_utilization(
-                _safe_call(mbltml.mbltmlGetTotalUtilization, dev_no)
+                device.call(mbltml.mbltmlGetTotalUtilization)
             ),
             "memory_usage_mb": memory_usage_mb,
             "memory_total_mb": memory_total_mb,
             "memory_usage_pct": _usage_pct(memory_usage_mb, memory_total_mb),
-            "temperature_c": _safe_call(mbltml.mbltmlGetTemperature, dev_no),
-            "node_name": _safe_call(mbltml.mbltmlGetNodeName, dev_no),
-            "hardware_version": _hardware_version_name(
-                _safe_call(mbltml.mbltmlGetHardwareVersion, dev_no)
-            ),
+            "temperature_c": device.call(mbltml.mbltmlGetTemperature),
+            "node_name": device.node_name,
+            "hardware_version": device.hardware_version,
+            "target_device_type": device.target_device_type_name,
         }
         if extra_rail_to_read is not None and self._selected_rail.get(dev_no) == extra_rail_to_read:
             selected_at = self._rail_selected_at.get(dev_no, 0.0)
             if now - selected_at >= _EXTRA_RAIL_REFRESH_PERIOD_S:
-                sample.update(_read_rail_values(dev_no, extra_rail_to_read))
+                sample.update(_read_rail_values(device, extra_rail_to_read))
         return sample
 
     def _restore_npu_rail_selection(self) -> None:
         now = time.time()
         for dev_no in self._selected_device_indices():
-            if _set_extra_rail(dev_no, "npu"):
+            if _set_extra_rail(self._devices[dev_no], dev_no, "npu"):
                 self._selected_rail[dev_no] = "npu"
                 self._rail_selected_at[dev_no] = now
         self._pending_extra_rail = None
@@ -245,6 +289,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
         self._device_metadata[dev_no] = {
             "node_name": sample.get("node_name"),
             "hardware_version": sample.get("hardware_version"),
+            "target_device_type": sample.get("target_device_type"),
         }
         memory_total_mb = _sample_float(sample, "memory_total_mb")
         if memory_total_mb is not None:
@@ -371,23 +416,72 @@ class NPUDeviceTracker(BaseDeviceTracker):
 
 
 def _initialize_mbltml() -> None:
-    try:
-        mbltml.mbltmlInitDevices(_supported_mbltml_device_types())
-    except AttributeError:
+    """Initialize mbltml once per process.
+
+    ``mbltmlInit()`` closes and reopens every device node, so calling it again
+    while another tracker samples on its scheduler thread is unsafe. An explicit
+    ``mbltmlShutdown()`` at exit avoids the mobilint-ml 1.5.3 Windows crash in
+    its static destructors when the library is still initialized (A2-364).
+    """
+    global _initialized_module
+    with _INIT_LOCK:
+        if _initialized_module is mbltml:
+            return
+        if not hasattr(mbltml, "mbltmlGetTargetDeviceCount"):
+            raise RuntimeError(
+                "The installed mbltml module predates the target-device-type API. "
+                "Uninstall the legacy 'mbltml' package and install 'mobilint-ml'."
+            )
         mbltml.mbltmlInit()
+        _initialized_module = mbltml
+        atexit.register(_shutdown_mbltml, mbltml)
 
 
-def _supported_mbltml_device_types() -> set[int]:
-    device_type_names = (
-        "MBLTML_DEVICE_ARIES",
-        "MBLTML_DEVICE_REGULUS",
-        "MBLTML_DEVICE_REGULUS_USB",
-    )
-    return {
-        device_type
-        for name in device_type_names
-        if isinstance((device_type := getattr(mbltml, name, None)), int)
-    }
+def _shutdown_mbltml(module: Any) -> None:
+    global _initialized_module
+    with _INIT_LOCK:
+        if _initialized_module is not module:
+            return
+        _initialized_module = None
+        if hasattr(module, "mbltmlShutdown"):
+            _safe_call(module.mbltmlShutdown)
+
+
+def _discover_devices() -> list[_NpuHandle]:
+    """Return every addressable NPU, ordered by its physical ``dev_no``.
+
+    Devices are collected per target device type and ordered the way mbltml
+    enumerates its system-wide device list: node family (ARIES, REGULUS, then
+    REGULUS USB) and node number. The list position is the physical
+    ``dev_no``, so a host with one target device type keeps mbltml's per-type
+    index. Nodes mbltml cannot classify are not addressable and are skipped.
+    """
+    devices = []
+    for type_rank, (attr, type_name, hw_version) in enumerate(_TARGET_DEVICE_TYPES):
+        tdt = getattr(mbltml, attr, None)
+        if not isinstance(tdt, int):
+            continue
+        count = _safe_call(mbltml.mbltmlGetTargetDeviceCount, tdt, default=0)
+        for index in range(count or 0):
+            devices.append(
+                _NpuHandle(
+                    target_device_type=tdt,
+                    target_device_type_name=type_name,
+                    index=index,
+                    node_name=_safe_call(mbltml.mbltmlGetNodeName, tdt, index),
+                    hardware_version=hw_version,
+                    type_rank=type_rank,
+                )
+            )
+    return sorted(devices, key=_enumeration_key)
+
+
+def _enumeration_key(device: _NpuHandle) -> tuple[int, float, int, int]:
+    match = _NODE_NAME_PATTERN.match(device.node_name or "")
+    if match is None or match.group(1) not in _NODE_FAMILY_ORDER:
+        return len(_NODE_FAMILY_ORDER), math.inf, device.type_rank, device.index
+    family_rank = _NODE_FAMILY_ORDER.index(match.group(1))
+    return family_rank, float(match.group(2)), device.type_rank, device.index
 
 
 def _normalize_npu_ids(npu_id: int | list[int] | None) -> list[int] | None:
@@ -415,21 +509,21 @@ def _normalize_rail_metrics(rail_metrics: str | Iterable[str]) -> tuple[str, ...
     return tuple(normalized or ["npu"])
 
 
-def _set_extra_rail(dev_no: int, rail: str) -> bool:
+def _set_extra_rail(device: _NpuHandle, dev_no: int, rail: str) -> bool:
     try:
         rail_id = getattr(mbltml, f"MBLTML_EXTRA_PMIC_ID_{rail.upper()}")
-        mbltml.mbltmlSetExtraPmicID(dev_no, rail_id)
+        mbltml.mbltmlSetExtraPmicID(device.target_device_type, device.index, rail_id)
     except Exception as exc:
         _LOGGER.debug("Unable to select %s rail for NPU %s: %s", rail, dev_no, exc)
         return False
     return True
 
 
-def _read_rail_values(dev_no: int, rail: str) -> dict[str, float | None]:
+def _read_rail_values(device: _NpuHandle, rail: str) -> dict[str, float | None]:
     return {
-        f"{rail}_rail_power_w": _safe_call(mbltml.mbltmlGetExtraPmicPower, dev_no),
-        f"{rail}_rail_current_a": _safe_call(mbltml.mbltmlGetExtraPmicCurrent, dev_no),
-        f"{rail}_rail_voltage_v": _safe_call(mbltml.mbltmlGetExtraPmicVoltage, dev_no),
+        f"{rail}_rail_power_w": device.call(mbltml.mbltmlGetExtraPmicPower),
+        f"{rail}_rail_current_a": device.call(mbltml.mbltmlGetExtraPmicCurrent),
+        f"{rail}_rail_voltage_v": device.call(mbltml.mbltmlGetExtraPmicVoltage),
     }
 
 
@@ -514,21 +608,11 @@ def _hex_or_none(value: int | None) -> str | None:
     return f"0x{value:x}" if isinstance(value, int) else None
 
 
-def _device_type_name(value: int | None) -> str | None:
+def _driver_type_name(value: int | None) -> str | None:
     mapping = {
-        getattr(mbltml, "MBLTML_DEVICE_ARIES", object()): "Aries",
-        getattr(mbltml, "MBLTML_DEVICE_REGULUS", object()): "Regulus",
-        getattr(mbltml, "MBLTML_DEVICE_REGULUS_USB", object()): "Regulus USB",
-    }
-    return mapping.get(value)
-
-
-def _hardware_version_name(value: int | None) -> str | None:
-    mapping = {
-        getattr(mbltml, "MBLTML_HARDWARE_VERSION_ARIES", object()): "Aries",
-        getattr(mbltml, "MBLTML_HARDWARE_VERSION_ARIES2", object()): "Aries2",
-        getattr(mbltml, "MBLTML_HARDWARE_VERSION_REGULUS", object()): "Regulus",
-        getattr(mbltml, "MBLTML_HARDWARE_VERSION_REGULUS2", object()): "Regulus2",
+        getattr(mbltml, "MBLTML_DRIVER_ARIES", object()): "Aries",
+        getattr(mbltml, "MBLTML_DRIVER_REGULUS", object()): "Regulus",
+        getattr(mbltml, "MBLTML_DRIVER_REGULUS_USB", object()): "Regulus USB",
     }
     return mapping.get(value)
 
@@ -538,8 +622,10 @@ def _get_mbltml_static_info() -> dict[str, object]:
         _initialize_mbltml()
     except Exception:
         return {}
-    device_count = _safe_call(mbltml.mbltmlGetDeviceCount, default=0)
-    npus = [_get_mbltml_device_static_info(dev_no) for dev_no in range(device_count)]
+    npus = [
+        _get_mbltml_device_static_info(dev_no, device)
+        for dev_no, device in enumerate(_discover_devices())
+    ]
     info: dict[str, object] = {"hardware": {"npus": [npu for npu in npus if npu]}}
     driver_versions = _get_mbltml_driver_versions()
     if driver_versions:
@@ -553,15 +639,15 @@ def _get_mbltml_static_info() -> dict[str, object]:
 
 def _get_mbltml_driver_versions() -> dict[str, str]:
     driver_types = {
-        "aries_version": getattr(mbltml, "MBLTML_DEVICE_ARIES", None),
-        "regulus_version": getattr(mbltml, "MBLTML_DEVICE_REGULUS", None),
-        "regulus_usb_version": getattr(mbltml, "MBLTML_DEVICE_REGULUS_USB", None),
+        "aries_version": getattr(mbltml, "MBLTML_DRIVER_ARIES", None),
+        "regulus_version": getattr(mbltml, "MBLTML_DRIVER_REGULUS", None),
+        "regulus_usb_version": getattr(mbltml, "MBLTML_DRIVER_REGULUS_USB", None),
     }
     versions = {}
-    for key, device_type in driver_types.items():
-        if device_type is None:
+    for key, driver_type in driver_types.items():
+        if driver_type is None:
             continue
-        version = _safe_call(mbltml.mbltmlGetDriverVersion, device_type)
+        version = _safe_call(mbltml.mbltmlGetDriverVersion, driver_type)
         if version is not None:
             versions[key] = version
     return versions
@@ -583,29 +669,36 @@ def _filter_static_info_to_device_indices(
     ]
 
 
-def _get_mbltml_device_static_info(dev_no: int) -> dict[str, object]:
-    firmware_version = _safe_call(mbltml.mbltmlGetFirmwareVersion, dev_no)
-    firmware_revision = _safe_call(mbltml.mbltmlGetFirmwareRevision, dev_no)
+def _get_mbltml_device_static_info(
+    dev_no: int, device: _NpuHandle
+) -> dict[str, object]:
+    firmware_version = device.call(mbltml.mbltmlGetFirmwareVersion)
+    firmware_revision = device.call(mbltml.mbltmlGetFirmwareRevision)
     return {
         key: value
         for key, value in {
             "dev_no": dev_no,
-            "node_name": _safe_call(mbltml.mbltmlGetNodeName, dev_no),
-            "device_type": _device_type_name(_safe_call(mbltml.mbltmlGetDeviceType, dev_no)),
-            "hardware_version": _hardware_version_name(_safe_call(mbltml.mbltmlGetHardwareVersion, dev_no)),
+            "node_name": device.node_name,
+            "device_type": _driver_type_name(device.call(mbltml.mbltmlGetDriverType)),
+            "target_device_type": device.target_device_type_name,
+            "hardware_version": device.hardware_version,
             "firmware": {
                 "version": firmware_version,
                 "revision": str(firmware_revision) if firmware_revision is not None else None,
             },
-            "vendor_id": _hex_or_none(_safe_call(mbltml.mbltmlGetVendorId, dev_no)),
-            "device_id": _hex_or_none(_safe_call(mbltml.mbltmlGetDeviceId, dev_no)),
-            "subsystem_vendor_id": _hex_or_none(_safe_call(mbltml.mbltmlGetSubVendorId, dev_no)),
-            "subsystem_device_id": _hex_or_none(_safe_call(mbltml.mbltmlGetSubDeviceId, dev_no)),
-            "link_generation": _safe_call(mbltml.mbltmlGetPcieGen, dev_no),
-            "lane_width": _safe_call(mbltml.mbltmlGetPcieLanes, dev_no),
-            "revision": _hex_or_none(_safe_call(mbltml.mbltmlGetPcieRev, dev_no)),
-            "class": _hex_or_none(_safe_call(mbltml.mbltmlGetPcieClassCode, dev_no)),
-            "memory_total_bytes": _safe_call(mbltml.mbltmlGetMemoryTotal, dev_no),
+            "vendor_id": _hex_or_none(device.call(mbltml.mbltmlGetVendorId)),
+            "device_id": _hex_or_none(device.call(mbltml.mbltmlGetDeviceId)),
+            "subsystem_vendor_id": _hex_or_none(
+                device.call(mbltml.mbltmlGetSubVendorId)
+            ),
+            "subsystem_device_id": _hex_or_none(
+                device.call(mbltml.mbltmlGetSubDeviceId)
+            ),
+            "link_generation": device.call(mbltml.mbltmlGetPcieGen),
+            "lane_width": device.call(mbltml.mbltmlGetPcieLanes),
+            "revision": _hex_or_none(device.call(mbltml.mbltmlGetPcieRev)),
+            "class": _hex_or_none(device.call(mbltml.mbltmlGetPcieClassCode)),
+            "memory_total_bytes": device.call(mbltml.mbltmlGetMemoryTotal),
         }.items()
         if value is not None and value != {"version": None, "revision": None}
     }

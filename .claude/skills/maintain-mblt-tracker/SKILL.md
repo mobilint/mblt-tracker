@@ -36,8 +36,9 @@ description: Maintain the mblt-tracker Python package and CLI. Use when changing
   and documented backend-specific aliases synchronized.
 - Represent unavailable measurements as `None`, empty traces, or zero samples;
   preserve valid measurements from the same tick.
-- Treat NPU indices as physical `mbltml` device numbers. Do not renumber a
-  selected subset.
+- Treat NPU indices as physical `dev_no` numbers in mbltml's system-wide
+  enumeration order, not the per-target-device-type index of the
+  `mobilint-ml` API. Do not renumber a selected subset.
 - Explicitly select extra-PMIC rails, wait for the firmware refresh period,
   sample the rail cycle without blocking, and restore NPU selection on stop.
 - Treat NVML and `mbltml` as authoritative for GPU and NPU discovery

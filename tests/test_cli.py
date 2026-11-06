@@ -436,3 +436,78 @@ def test_collect_parser_rejects_removed_pcie_filter_options(
 ) -> None:
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["collect", removed_option, "209f"])
+
+
+def test_collect_static_info_reads_npus_through_target_device_type_api(
+    monkeypatch,
+) -> None:
+    import mblt_tracker.device_tracker_npu as npu_module
+
+    class TargetDeviceTypeMbltml:
+        MBLTML_DRIVER_ARIES = 1
+        MBLTML_TARGET_DEVICE_ARIES_RA = 1
+        MBLTML_TARGET_DEVICE_ARIES_RB = 3
+        nodes = {1: ["/dev/aries1"], 3: ["/dev/aries0"]}
+
+        def mbltmlInit(self):  # noqa: N802
+            pass
+
+        def mbltmlGetTargetDeviceCount(self, tdt):  # noqa: N802
+            return len(self.nodes.get(tdt, []))
+
+        def mbltmlGetNodeName(self, tdt, dev_no):  # noqa: N802
+            return self.nodes[tdt][dev_no]
+
+        def mbltmlGetDriverType(self, tdt, dev_no):  # noqa: N802
+            return self.MBLTML_DRIVER_ARIES
+
+        def mbltmlGetFirmwareVersion(self, tdt, dev_no):  # noqa: N802
+            return f"fw-{self.nodes[tdt][dev_no]}"
+
+        def mbltmlGetDriverVersion(self, driver_type):  # noqa: N802
+            if driver_type != self.MBLTML_DRIVER_ARIES:
+                raise RuntimeError("driver not found")
+            return "1.13.0"
+
+        def __getattr__(self, name):
+            def not_supported(*_args):
+                raise RuntimeError(f"{name}: not supported")
+
+            return not_supported
+
+    monkeypatch.setattr(npu_module, "mbltml", TargetDeviceTypeMbltml())
+    monkeypatch.setattr(
+        cli,
+        "get_host_static_info",
+        lambda sudo_password=None, sudo_password_provider=None, pcie_devices=None: {
+            "hardware": {"cpu": {"architecture": "aarch64"}}
+        },
+    )
+    monkeypatch.setattr(cli, "get_pcie_static_info", lambda **_kwargs: {})
+    monkeypatch.setattr(cli, "get_all_pcie_devices", lambda: [])
+    monkeypatch.setattr(cli, "get_nvml_gpu_static_info", lambda **_kwargs: {})
+
+    info = cli.collect_static_info()
+
+    assert info["hardware"]["npus"] == [
+        {
+            "dev_no": 0,
+            "node_name": "/dev/aries0",
+            "device_type": "Aries",
+            "target_device_type": "aries-rb",
+            "hardware_version": "Aries2",
+            "firmware": {"version": "fw-/dev/aries0"},
+        },
+        {
+            "dev_no": 1,
+            "node_name": "/dev/aries1",
+            "device_type": "Aries",
+            "target_device_type": "aries-ra",
+            "hardware_version": "Aries",
+            "firmware": {"version": "fw-/dev/aries1"},
+        },
+    ]
+    assert info["inference"] == {
+        "npu_driver_version": "1.13.0",
+        "driver": {"aries_version": "1.13.0"},
+    }
