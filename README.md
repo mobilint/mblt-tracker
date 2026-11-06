@@ -19,7 +19,7 @@
 
 ### ✨ Key Features
 
-- **Multi-Backend Support**: Unified interface for Intel CPU/DRAM, NVIDIA GPU, and Mobilint NPU.
+- **Multi-Backend Support**: Unified interface for Intel CPU/DRAM, NVIDIA GPU, NVIDIA Jetson, and Mobilint NPU.
 - **Background Tracking**: Uses a background scheduler to poll metrics without blocking your main execution.
 - **Comprehensive Metrics**: Capture Power (Watts), Utilization (%), Memory Usage (MB/%), and Temperature (C).
 - **Statistical Summaries**: Automatically calculates averages, peaks (max), and p99 values.
@@ -56,7 +56,7 @@ pip install -e .
 The typical workflow involves initializing a tracker, starting it before your target workload, and stopping it after.
 
 ```python
-from mblt_tracker import CPUDeviceTracker # or DRAMDeviceTracker, GPUDeviceTracker, NPUDeviceTracker
+from mblt_tracker import CPUDeviceTracker # or DRAMDeviceTracker, GPUDeviceTracker, JetsonDeviceTracker, NPUDeviceTracker
 
 # 1. Initialize with a polling interval (seconds)
 tracker = CPUDeviceTracker(interval=0.1)
@@ -609,14 +609,14 @@ Warning: NVML not available. GPU information will not be collected.
 
 ## Metrics Coverage
 
-| Metric | Intel CPU | Host DRAM | NVIDIA GPU | Mobilint NPU |
-| :--- | :---: | :---: | :---: | :---: |
-| **Power (W)** | ✅ (RAPL) | ✅ (RAPL DRAM) | ✅ (NVML) | ✅ (`mbltml`) |
-| **Utilization (%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
-| **Memory (MB/%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
-| **Temperature (C)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
-| **Static Info** | ✅ Host/OS/DRAM/Motherboard | ✅ Host/OS/DRAM/Motherboard | ✅ NVML + PCIe | ✅ `mbltml` + PCIe enrichment |
-| **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (`mbltml` Device Indices) |
+| Metric | Intel CPU | Host DRAM | NVIDIA GPU | NVIDIA Jetson | Mobilint NPU |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Power (W)** | ✅ (RAPL) | ✅ (RAPL DRAM) | ✅ (NVML) | ✅ (INA3221 sysfs) | ✅ (`mbltml`) |
+| **Utilization (%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (GPU `load` sysfs) | ✅ (`mbltml`) |
+| **Memory (MB/%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (shared, `/proc/meminfo`) | ✅ (`mbltml`) |
+| **Temperature (C)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`gpu-thermal` zone) | ✅ (`mbltml`) |
+| **Static Info** | ✅ Host/OS/DRAM/Motherboard | ✅ Host/OS/DRAM/Motherboard | ✅ NVML + PCIe | ✅ Model + L4T + rails | ✅ `mbltml` + PCIe enrichment |
+| **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (Power Rails) | ✅ (`mbltml` Device Indices) |
 
 ---
 
@@ -684,6 +684,33 @@ Uses **NVML** (via `nvidia-ml-py`) for high-fidelity hardware monitoring.
 - **Dependencies**: Requires NVIDIA Drivers and NVML library installed.
 - **Temperature**: Reads on-die GPU temperature through NVML.
 - **Static Info**: `GPUDeviceTracker.get_static_info()` reports the detected GPU count, tracked device names, NVIDIA driver version, and the raw NVML CUDA driver version. The `mblt-tracker collect` CLI provides richer NVML-discovered GPU metadata; for NVIDIA GPUs, PCIe link generation/width fields come from NVML, while OS PCIe discovery may add non-link identifiers and descriptive metadata.
+
+### NVIDIA Jetson
+
+Reads the on-module **INA3221** power monitors and Tegra sysfs nodes. Jetson
+GPUs do not report power or utilization through NVML, so use
+`JetsonDeviceTracker` instead of `GPUDeviceTracker` on Jetson.
+
+- **Permission**: No root privileges required; all inputs are world-readable
+  sysfs/procfs files.
+- **Power**: Sums every labeled INA3221 rail (for example `VDD_GPU_SOC`,
+  `VDD_CPU_CV`, `VIN_SYS_5V0`, and `VDDQ_VDD2_1V8AO` on AGX Orin) into the
+  standard `avg_power_w`, `p99_power_w`, and `max_power_w` keys, and reports
+  per-rail statistics under `metrics["rails"]`. Pass
+  `JetsonDeviceTracker(rails=["VDD_GPU_SOC"])` to sum a subset.
+- **Utilization**: Integrated GPU load from the GPU `load` node.
+- **Memory**: System memory from `/proc/meminfo`, which the CPU and GPU share.
+- **Temperature**: The `gpu-thermal` thermal zone.
+- **Detection**: `JetsonDeviceTracker.is_available()` returns `True` on a
+  Jetson with readable INA3221 rails.
+- **Static Info**: `JetsonDeviceTracker.get_static_info()` reports the device
+  tree model name, the L4T release, and the tracked rail labels.
+- **Installation**: `mblt-tracker` still depends on `mbltml`, which publishes
+  no aarch64 wheel. On Jetson, install it with
+  `pip install --no-deps mblt-tracker` and add `numpy`, `apscheduler`,
+  `psutil`, `pyRAPL`, `nvidia-ml-py`, and `setuptools`; `mblt_tracker` import
+  also needs an importable `mbltml` module until the NPU backend moves to
+  `mobilint-ml`.
 
 ### Host DRAM
 

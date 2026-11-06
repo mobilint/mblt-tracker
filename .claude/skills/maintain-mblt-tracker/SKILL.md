@@ -1,6 +1,6 @@
 ---
 name: maintain-mblt-tracker
-description: Maintain the mblt-tracker Python package and CLI. Use when changing tracker lifecycle, CPU/DRAM/GPU/NPU backends, metric names or aliases, NPU rail sampling, static metadata or privacy, CLI JSON, TypedDict schemas, dependencies, packaging, tests, CI, releases, or synchronized repository guides.
+description: Maintain the mblt-tracker Python package and CLI. Use when changing tracker lifecycle, CPU/DRAM/GPU/Jetson/NPU backends, metric names or aliases, NPU rail sampling, static metadata or privacy, CLI JSON, TypedDict schemas, dependencies, packaging, tests, CI, releases, or synchronized repository guides.
 ---
 
 # Maintain MBLT Tracker
@@ -17,7 +17,7 @@ description: Maintain the mblt-tracker Python package and CLI. Use when changing
 
 - Change shared scheduling and lifecycle behavior in `device_tracker.py`.
 - Change telemetry reads and summaries in the matching
-  `device_tracker_{cpu,dram,gpu,npu}.py`.
+  `device_tracker_{cpu,dram,gpu,jetson,npu}.py`.
 - Change host, platform, PCIe, NVML, merge, or sanitization behavior in
   `static_info.py`.
 - Change collection order and JSON output in `cli.py`.

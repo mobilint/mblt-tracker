@@ -1,9 +1,26 @@
 # CHANGELOG
 
-## 1.0.2
+## 1.1.0
+
+### Added
+
+- Added `JetsonDeviceTracker` for NVIDIA Jetson. Jetson GPUs report no power or
+  utilization through NVML, so the tracker reads the on-module INA3221 rails
+  from hwmon sysfs (no root required) and reports their sum through the
+  standard `*_power_w` keys plus per-rail statistics under `rails`. It also
+  records integrated GPU load, the `gpu-thermal` zone temperature, and the
+  system memory shared by the CPU and GPU. `JetsonDeviceTracker.is_available()`
+  detects a Jetson with readable rails, and `get_static_info()` reports the
+  device-tree model, L4T release, and rail labels.
 
 ### Fixed
 
+- Made `stop()` a no-op on a tracker that is not running. A repeated `stop()`
+  previously took one more sample, so callers that stop a phase tracker and
+  stop it again in cleanup code appended a late sample to an already closed
+  window and over-counted that window's duration and energy. This affected
+  every backend; for example, a prefill tracker stopped again after decode
+  reported energy for the whole request.
 - Prevented optional sudo credentials used for Linux DMI collection from being
   exposed to executables substituted through an attacker-controlled `PATH`. The
   password-bearing `sudo -S` call now runs only a `sudo` found at a trusted

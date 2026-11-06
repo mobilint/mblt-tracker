@@ -16,6 +16,8 @@ the same change and run the synchronization checks before finishing.
   utilization, host memory, and best-effort temperature.
 - `mblt_tracker/device_tracker_dram.py`: Intel RAPL DRAM-domain power.
 - `mblt_tracker/device_tracker_gpu.py`: NVIDIA NVML discovery and telemetry.
+- `mblt_tracker/device_tracker_jetson.py`: NVIDIA Jetson INA3221 rail power,
+  integrated GPU load, shared memory, and GPU thermal-zone telemetry via sysfs.
 - `mblt_tracker/device_tracker_npu.py`: `mbltml` discovery, telemetry, rail
   state machine, and NPU static metadata.
 - `mblt_tracker/static_info.py`: Linux/Windows host, OS, DRAM, motherboard,
@@ -37,7 +39,8 @@ takes one best-effort sample, starts a background scheduler, and installs one
 interval job. `stop()` takes a final best-effort sample and shuts the scheduler
 down. Backends implement summaries, traces, static information, and reset.
 
-Preserve this lifecycle and keep repeated `start()` and `stop()` safe. Sampling
+Preserve this lifecycle and keep repeated `start()` and `stop()` safe;
+`stop()` on a tracker that is not running must not record another sample. Sampling
 failures should not terminate the workload when a measurement can be reported
 as unavailable. Return copies of trace lists, not internal mutable storage.
 
@@ -50,6 +53,11 @@ as unavailable. Return copies of trace lists, not internal mutable storage.
 - GPU uses NVML indices and reports aggregate and per-device power,
   utilization, memory, and temperature. Unavailable power or temperature must
   not discard otherwise valid samples from the same tick.
+- Jetson reads the labeled on-module INA3221 rails from hwmon sysfs without
+  root and reports their sum as total power plus per-rail power under
+  `rails`. GPU load, GPU temperature, and shared system memory are best
+  effort. NVML reports no Jetson power or utilization, so do not route Jetson
+  through the GPU backend.
 - NPU uses physical `mbltml` device indices for discovery, selection,
   per-device metrics, and static identity. Never renumber a selected subset.
   Total device telemetry is separate from extra-PMIC rail telemetry.
