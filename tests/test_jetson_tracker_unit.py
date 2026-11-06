@@ -187,10 +187,27 @@ def test_unreadable_sensors_keep_other_measurements(
     tracker._func_for_sched()
     metrics = tracker.get_metric()
 
-    assert metrics["avg_power_w"] == pytest.approx(15.0)
+    # A missing contributing rail must not be reported as a lower total.
+    assert metrics["avg_power_w"] is None
+    assert tracker.get_trace() == []
     assert metrics["rails"]["VDD_GPU_SOC"]["avg_power_w"] is None
+    assert metrics["rails"]["VDD_CPU_CV"]["avg_power_w"] is not None
     assert metrics["avg_temperature_c"] is None
     assert metrics["avg_gpu_util_pct"] == pytest.approx(62.5)
+
+
+def test_unreadable_excluded_rail_keeps_total_power(jetson_root: Path) -> None:
+    tracker = JetsonDeviceTracker(interval=0.1, sysfs_root=str(jetson_root))
+    (
+        jetson_root / "sys/bus/i2c/drivers/ina3221/1-0041/hwmon/hwmon2/curr2_input"
+    ).unlink()
+
+    tracker._func_for_sched()
+    metrics = tracker.get_metric()
+
+    # VDDQ_VDD2_1V8AO is not summed into total power, so losing it is harmless.
+    assert metrics["avg_power_w"] == pytest.approx(35.0)
+    assert metrics["rails"]["VDDQ_VDD2_1V8AO"]["avg_power_w"] is None
 
 
 def test_reset_clears_samples(jetson_root: Path) -> None:

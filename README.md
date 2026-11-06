@@ -714,6 +714,11 @@ GPUs do not report power or utilization through NVML, so use
   `JetsonDeviceTracker(rails=["VDD_GPU_SOC"])` to sum exactly the rails you
   name instead; overlapping rails are then summed as requested, and every
   rail is still reported under `metrics["rails"]`.
+
+  A tick records total power only when every rail summed into it was read;
+  if one is unreadable, that tick has no total-power sample instead of a
+  misleadingly low partial sum. Readable rails, utilization, memory, and
+  temperature are still recorded for that tick.
 - **Utilization**: Integrated GPU load from the GPU `load` node.
 - **Memory**: System memory from `/proc/meminfo`, which the CPU and GPU share.
 - **Temperature**: The `gpu-thermal` thermal zone.

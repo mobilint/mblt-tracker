@@ -175,16 +175,14 @@ class JetsonDeviceTracker(BaseDeviceTracker):
         temp_c = self.gpu_temperature()
         ts = time.time()
 
-        valid_powers = [
-            power
-            for rail, power in powers.items()
-            if rail in self._total_rails and power is not None
-        ]
         for rail, power in powers.items():
             if power is not None:
                 self._rail_power_glance[rail].append(power)
-        if valid_powers:
-            self._power_trace.append((ts, float(sum(valid_powers))))
+        # A partial sum would look like a real power drop, so record total
+        # power only when every contributing rail was read this tick.
+        total_powers = [powers[rail] for rail in self._total_rails]
+        if all(power is not None for power in total_powers):
+            self._power_trace.append((ts, float(sum(total_powers))))
         if gpu_util_pct is not None:
             self._gpu_util_trace.append((ts, gpu_util_pct))
         if memory is not None:

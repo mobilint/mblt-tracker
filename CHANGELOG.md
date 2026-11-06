@@ -11,7 +11,10 @@
   `rails`. Total power excludes rails that another rail already includes: it
   is `VDD_IN` alone when present (Orin NX/Nano), and on AGX Orin it is
   `VDD_GPU_SOC + VDD_CPU_CV + VIN_SYS_5V0` without the `VDDQ_VDD2_1V8AO`
-  sub-rail. Explicit `rails=[...]` are summed as requested. This is on-module
+  sub-rail. Explicit `rails=[...]` are summed as requested. A tick with an
+  unreadable contributing rail records no total-power sample rather than a
+  partial sum, while readable rails and other metrics are still recorded.
+  This is on-module
   power only; carrier-board loads such as the fan, NVMe, USB, Ethernet, and
   PCIe cards are not measured. The tracker also records integrated GPU load,
   the `gpu-thermal` zone temperature, and the system memory shared by the CPU
