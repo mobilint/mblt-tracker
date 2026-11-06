@@ -693,18 +693,36 @@ GPUs do not report power or utilization through NVML, so use
 
 - **Permission**: No root privileges required; all inputs are world-readable
   sysfs/procfs files.
-- **Power**: Sums every labeled INA3221 rail (for example `VDD_GPU_SOC`,
-  `VDD_CPU_CV`, `VIN_SYS_5V0`, and `VDDQ_VDD2_1V8AO` on AGX Orin) into the
-  standard `avg_power_w`, `p99_power_w`, and `max_power_w` keys, and reports
-  per-rail statistics under `metrics["rails"]`. Pass
-  `JetsonDeviceTracker(rails=["VDD_GPU_SOC"])` to sum a subset.
+- **Power scope**: Total power is **module power** measured by the
+  on-module INA3221 monitors. It is not carrier-board or whole-device power:
+  the fan, NVMe, USB devices, Ethernet, PCIe cards, and other carrier-board
+  loads are excluded. Use an external meter for wall power.
+- **Power**: Reports total power through the standard `avg_power_w`,
+  `p99_power_w`, and `max_power_w` keys and per-rail statistics for every
+  discovered rail under `metrics["rails"]`. Some rails already include
+  others, so the default total avoids double counting, following NVIDIA's
+  [power monitor tables](https://docs.nvidia.com/jetson/archives/r36.4.4/DeveloperGuide/SD/PlatformPowerAndPerformance/JetsonOrinNanoSeriesJetsonOrinNxSeriesAndJetsonAgxOrinSeries.html):
+  - if a module input rail `VDD_IN` exists (Orin NX/Nano), total power is
+    `VDD_IN` alone; its sub-rails `VDD_CPU_GPU_CV` and `VDD_SOC` are reported
+    per rail only;
+  - otherwise total power is the sum of the labeled rails minus known
+    sub-rails. On AGX Orin this is `VDD_GPU_SOC + VDD_CPU_CV + VIN_SYS_5V0`;
+    `VDDQ_VDD2_1V8AO` is already included in `VIN_SYS_5V0`.
+
+  `tracker.total_rails` and the static `power_total_rails` field list the
+  rails summed into total power. Pass
+  `JetsonDeviceTracker(rails=["VDD_GPU_SOC"])` to sum exactly the rails you
+  name instead; overlapping rails are then summed as requested, and every
+  rail is still reported under `metrics["rails"]`.
 - **Utilization**: Integrated GPU load from the GPU `load` node.
 - **Memory**: System memory from `/proc/meminfo`, which the CPU and GPU share.
 - **Temperature**: The `gpu-thermal` thermal zone.
 - **Detection**: `JetsonDeviceTracker.is_available()` returns `True` on a
   Jetson with readable INA3221 rails.
 - **Static Info**: `JetsonDeviceTracker.get_static_info()` reports the device
-  tree model name, the L4T release, and the tracked rail labels.
+  tree model name, the L4T release, every discovered rail label
+  (`power_rails`), and the rails summed into total power
+  (`power_total_rails`).
 - **Installation**: `mblt-tracker` still depends on `mbltml`, which publishes
   no aarch64 wheel. On Jetson, install it with
   `pip install --no-deps mblt-tracker` and add `numpy`, `apscheduler`,

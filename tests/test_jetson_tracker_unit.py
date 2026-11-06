@@ -24,15 +24,26 @@ _RAILS = {
 }
 
 
+# Mirrors an Orin NX/Nano: VDD_IN is total module power and already includes
+# the other two channels.
+_ORIN_NX_RAILS = {
+    "1-0040/hwmon/hwmon1": {
+        1: ("VDD_IN", 5000, 3000, None),
+        2: ("VDD_CPU_GPU_CV", 5000, 1000, None),
+        3: ("VDD_SOC", 5000, 800, None),
+        7: ("sum of shunt voltages", 840, None, None),
+    },
+}
+
+
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
 
 
-@pytest.fixture()
-def jetson_root(tmp_path: Path) -> Path:
-    for hwmon, channels in _RAILS.items():
-        base = tmp_path / "sys/bus/i2c/drivers/ina3221" / hwmon
+def _write_rails(root: Path, rails: dict) -> None:
+    for hwmon, channels in rails.items():
+        base = root / "sys/bus/i2c/drivers/ina3221" / hwmon
         for channel, (label, voltage_mv, current_ma, enable) in channels.items():
             if label is not None:
                 _write(base / f"in{channel}_label", f"{label}\n")
@@ -41,6 +52,17 @@ def jetson_root(tmp_path: Path) -> Path:
                 _write(base / f"curr{channel}_input", f"{current_ma}\n")
             if enable is not None:
                 _write(base / f"in{channel}_enable", f"{enable}\n")
+
+
+@pytest.fixture()
+def orin_nx_root(tmp_path: Path) -> Path:
+    _write_rails(tmp_path, _ORIN_NX_RAILS)
+    return tmp_path
+
+
+@pytest.fixture()
+def jetson_root(tmp_path: Path) -> Path:
+    _write_rails(tmp_path, _RAILS)
     _write(tmp_path / "sys/devices/platform/bus@0/17000000.gpu/load", "625\n")
     _write(tmp_path / "sys/class/thermal/thermal_zone0/type", "cpu-thermal\n")
     _write(tmp_path / "sys/class/thermal/thermal_zone0/temp", "53000\n")
@@ -74,6 +96,8 @@ def test_discovers_labeled_enabled_rails_only(jetson_root: Path) -> None:
         "VIN_SYS_5V0",
         "VDDQ_VDD2_1V8AO",
     ]
+    # VDDQ_VDD2_1V8AO is already included in VIN_SYS_5V0.
+    assert tracker.total_rails == ["VDD_GPU_SOC", "VDD_CPU_CV", "VIN_SYS_5V0"]
 
 
 def test_sample_sums_rail_power_and_reads_load_memory_temperature(
@@ -85,10 +109,11 @@ def test_sample_sums_rail_power_and_reads_load_memory_temperature(
     tracker._func_for_sched()
     metrics = tracker.get_metric()
 
-    # 20 W + 10 W + 5 W + 1 W
-    assert tracker.get_trace() == [(10.0, 36.0)]
-    assert metrics["avg_power_w"] == pytest.approx(36.0)
+    # 20 W + 10 W + 5 W; the 1 W VDDQ sub-rail is inside VIN_SYS_5V0.
+    assert tracker.get_trace() == [(10.0, 35.0)]
+    assert metrics["avg_power_w"] == pytest.approx(35.0)
     assert metrics["rails"]["VDD_GPU_SOC"]["avg_power_w"] == pytest.approx(20.0)
+    assert metrics["rails"]["VDDQ_VDD2_1V8AO"]["avg_power_w"] == pytest.approx(1.0)
     assert metrics["avg_gpu_util_pct"] == pytest.approx(62.5)
     assert metrics["avg_utilization_pct"] == pytest.approx(62.5)
     assert metrics["total_memory_mb"] == pytest.approx(32000.0)
@@ -99,6 +124,20 @@ def test_sample_sums_rail_power_and_reads_load_memory_temperature(
     assert metrics["util_samples"] == 1
 
 
+def test_module_input_rail_is_the_default_total(orin_nx_root: Path) -> None:
+    tracker = JetsonDeviceTracker(interval=0.1, sysfs_root=str(orin_nx_root))
+
+    tracker._func_for_sched()
+    metrics = tracker.get_metric()
+
+    assert tracker.rails == ["VDD_IN", "VDD_CPU_GPU_CV", "VDD_SOC"]
+    assert tracker.total_rails == ["VDD_IN"]
+    # VDD_IN = 15 W; the 5 W and 4 W sub-rails are not added on top.
+    assert metrics["avg_power_w"] == pytest.approx(15.0)
+    assert metrics["rails"]["VDD_CPU_GPU_CV"]["avg_power_w"] == pytest.approx(5.0)
+    assert metrics["rails"]["VDD_SOC"]["avg_power_w"] == pytest.approx(4.0)
+
+
 def test_selected_rails_limit_total_power(jetson_root: Path) -> None:
     tracker = JetsonDeviceTracker(
         interval=0.1, rails=["VDD_GPU_SOC"], sysfs_root=str(jetson_root)
@@ -106,8 +145,24 @@ def test_selected_rails_limit_total_power(jetson_root: Path) -> None:
 
     tracker._func_for_sched()
 
+    assert tracker.total_rails == ["VDD_GPU_SOC"]
     assert tracker.get_metric()["avg_power_w"] == pytest.approx(20.0)
-    assert list(tracker.get_metric()["rails"]) == ["VDD_GPU_SOC"]
+    # Per-rail statistics still cover every discovered rail.
+    assert list(tracker.get_metric()["rails"]) == tracker.rails
+
+
+def test_explicit_rails_are_summed_as_requested(jetson_root: Path) -> None:
+    tracker = JetsonDeviceTracker(
+        interval=0.1,
+        rails=["VIN_SYS_5V0", "VDDQ_VDD2_1V8AO"],
+        sysfs_root=str(jetson_root),
+    )
+
+    tracker._func_for_sched()
+
+    # The caller asked for an overlapping pair; honor it: 5 W + 1 W.
+    assert tracker.total_rails == ["VIN_SYS_5V0", "VDDQ_VDD2_1V8AO"]
+    assert tracker.get_metric()["avg_power_w"] == pytest.approx(6.0)
 
 
 def test_unknown_rail_is_rejected(jetson_root: Path) -> None:
@@ -132,7 +187,7 @@ def test_unreadable_sensors_keep_other_measurements(
     tracker._func_for_sched()
     metrics = tracker.get_metric()
 
-    assert metrics["avg_power_w"] == pytest.approx(16.0)
+    assert metrics["avg_power_w"] == pytest.approx(15.0)
     assert metrics["rails"]["VDD_GPU_SOC"]["avg_power_w"] is None
     assert metrics["avg_temperature_c"] is None
     assert metrics["avg_gpu_util_pct"] == pytest.approx(62.5)
@@ -164,6 +219,11 @@ def test_static_info(jetson_root: Path) -> None:
         {"device_index": 0, "name": "NVIDIA Jetson AGX Orin Developer Kit"}
     ]
     assert info["hardware"]["gpu"]["power_rails"] == tracker.rails
+    assert info["hardware"]["gpu"]["power_total_rails"] == [
+        "VDD_GPU_SOC",
+        "VDD_CPU_CV",
+        "VIN_SYS_5V0",
+    ]
     assert info["inference"]["gpu"]["l4t"] == {"version": "36.5.2"}
 
 

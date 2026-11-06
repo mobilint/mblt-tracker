@@ -21,14 +21,36 @@ _DEVICE_TREE_COMPATIBLE = "proc/device-tree/compatible"
 _L4T_RELEASE = "etc/nv_tegra_release"
 _MEMINFO = "proc/meminfo"
 
+# Default total-power rule. Some INA3221 channels measure a rail that another
+# channel already includes, so summing every channel double-counts. Source:
+# NVIDIA Jetson Linux Developer Guide, "Platform Power and Performance" ->
+# power monitor tables for Orin Nano/NX and AGX Orin (r36.4.4):
+# https://docs.nvidia.com/jetson/archives/r36.4.4/DeveloperGuide/SD/PlatformPowerAndPerformance/JetsonOrinNanoSeriesJetsonOrinNxSeriesAndJetsonAgxOrinSeries.html
+#
+# Rails that measure the whole module input. When one is present it alone is
+# the total; the other channels are its sub-rails (Orin NX/Nano: VDD_IN with
+# VDD_CPU_GPU_CV and VDD_SOC).
+_MODULE_INPUT_RAILS = ("VDD_IN",)
+# Sub-rail -> parent rail that already includes it. A sub-rail is left out of
+# the total only when its parent is also present. AGX Orin: VDDQ_VDD2_1V8AO is
+# fed from VIN_SYS_5V0, so module power is VDD_GPU_SOC + VDD_CPU_CV +
+# VIN_SYS_5V0.
+_SUB_RAILS = {"VDDQ_VDD2_1V8AO": "VIN_SYS_5V0"}
+
 
 class JetsonDeviceTracker(BaseDeviceTracker):
     """Track NVIDIA Jetson power, GPU load, memory, and temperature through sysfs.
 
     Jetson GPUs do not report power or utilization through NVML. This tracker
     reads the on-module INA3221 power rails, the integrated GPU load, the GPU
-    thermal zone, and system memory (CPU and GPU share it). Total power is the
-    sum of all labeled INA3221 rails. No root privileges are required.
+    thermal zone, and system memory (CPU and GPU share it). No root privileges
+    are required.
+
+    Total power is module power from the on-module INA3221 monitors, not
+    carrier-board or whole-device power. By default it is the module input
+    rail (``VDD_IN``) when present, otherwise the sum of labeled rails minus
+    sub-rails another rail already includes (``VDDQ_VDD2_1V8AO`` on AGX
+    Orin). Every discovered rail is still reported under ``"rails"``.
     """
 
     def __init__(
@@ -43,8 +65,11 @@ class JetsonDeviceTracker(BaseDeviceTracker):
             interval (float): The interval in seconds at which the device should
                 be polled.
             rails (list[str] | None): INA3221 rail labels to sum into total
-                power, such as ``["VDD_GPU_SOC", "VDD_CPU_CV"]``. If None, all
-                labeled rails are used.
+                power, such as ``["VDD_GPU_SOC", "VDD_CPU_CV"]``. They are
+                summed exactly as given, even if they overlap. If None, the
+                non-overlapping default set is used (see the class docstring).
+                Every discovered rail is sampled for per-rail statistics
+                either way.
             sysfs_root (str): Filesystem root to read from; tests point it at a
                 fake tree.
 
@@ -58,7 +83,7 @@ class JetsonDeviceTracker(BaseDeviceTracker):
         if not available_rails:
             raise ValueError("No Jetson INA3221 power rails found")
         if rails is None:
-            rails = list(available_rails)
+            rails = _default_total_rails(list(available_rails))
         else:
             unknown = [rail for rail in rails if rail not in available_rails]
             if unknown:
@@ -66,7 +91,8 @@ class JetsonDeviceTracker(BaseDeviceTracker):
                     f"Unknown Jetson power rail(s): {unknown}; "
                     f"available: {list(available_rails)}"
                 )
-        self._rail_paths = {rail: available_rails[rail] for rail in rails}
+        self._rail_paths = available_rails
+        self._total_rails = list(dict.fromkeys(rails))
         self._gpu_load_path = _first_existing(sysfs_root, _GPU_LOAD_GLOBS)
         self._gpu_temp_path = _find_thermal_zone(sysfs_root, _GPU_THERMAL_ZONE_TYPE)
         self._job_id = "jetson_device_track"
@@ -82,11 +108,16 @@ class JetsonDeviceTracker(BaseDeviceTracker):
 
     @property
     def rails(self) -> list[str]:
-        """Return the INA3221 rail labels summed into total power."""
+        """Return every discovered INA3221 rail label, as reported in ``rails``."""
         return list(self._rail_paths)
 
+    @property
+    def total_rails(self) -> list[str]:
+        """Return the INA3221 rail labels summed into total power."""
+        return list(self._total_rails)
+
     def rail_power(self) -> dict[str, float | None]:
-        """Get instantaneous power in Watts for each tracked rail.
+        """Get instantaneous power in Watts for every discovered rail.
 
         Returns:
             dict[str, float | None]: Rail label to power in Watts, or None when
@@ -144,7 +175,11 @@ class JetsonDeviceTracker(BaseDeviceTracker):
         temp_c = self.gpu_temperature()
         ts = time.time()
 
-        valid_powers = [power for power in powers.values() if power is not None]
+        valid_powers = [
+            power
+            for rail, power in powers.items()
+            if rail in self._total_rails and power is not None
+        ]
         for rail, power in powers.items():
             if power is not None:
                 self._rail_power_glance[rail].append(power)
@@ -237,7 +272,11 @@ class JetsonDeviceTracker(BaseDeviceTracker):
         return list(self._temp_trace)
 
     def get_static_info(self) -> dict[str, object]:
-        """Return best-effort Jetson model, L4T release, and power-rail labels."""
+        """Return best-effort Jetson model, L4T release, and power-rail labels.
+
+        ``power_rails`` lists every discovered rail; ``power_total_rails`` lists
+        the rails summed into total power.
+        """
         model = _read_text(os.path.join(self._root, _DEVICE_TREE_MODEL))
         release = _read_text(os.path.join(self._root, _L4T_RELEASE))
         return {
@@ -251,6 +290,7 @@ class JetsonDeviceTracker(BaseDeviceTracker):
                         }
                     ],
                     "power_rails": self.rails,
+                    "power_total_rails": self.total_rails,
                 }
             },
             "inference": {
@@ -290,6 +330,18 @@ def _discover_rails(sysfs_root: str) -> dict[str, tuple[str, str]]:
             if os.path.exists(voltage_path) and os.path.exists(current_path):
                 rails[label.strip()] = (voltage_path, current_path)
     return rails
+
+
+def _default_total_rails(available: list[str]) -> list[str]:
+    """Pick the non-overlapping rails whose sum is module power."""
+    for rail in _MODULE_INPUT_RAILS:
+        if rail in available:
+            return [rail]
+    return [
+        rail
+        for rail in available
+        if not (rail in _SUB_RAILS and _SUB_RAILS[rail] in available)
+    ]
 
 
 def _first_existing(sysfs_root: str, patterns: tuple[str, ...]) -> str | None:

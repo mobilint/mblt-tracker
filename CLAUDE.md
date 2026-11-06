@@ -54,8 +54,11 @@ as unavailable. Return copies of trace lists, not internal mutable storage.
   utilization, memory, and temperature. Unavailable power or temperature must
   not discard otherwise valid samples from the same tick.
 - Jetson reads the labeled on-module INA3221 rails from hwmon sysfs without
-  root and reports their sum as total power plus per-rail power under
-  `rails`. GPU load, GPU temperature, and shared system memory are best
+  root and reports per-rail power for every rail under `rails`. Total power
+  is module power, not carrier-board or device power, and must not
+  double-count: by default it is `VDD_IN` alone when present, otherwise the
+  labeled rails minus the sub-rails in `_SUB_RAILS` (NVIDIA power monitor
+  tables). Explicit `rails=[...]` are summed exactly as requested. GPU load, GPU temperature, and shared system memory are best
   effort. NVML reports no Jetson power or utilization, so do not route Jetson
   through the GPU backend.
 - NPU uses physical `mbltml` device indices for discovery, selection,
