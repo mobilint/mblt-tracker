@@ -19,7 +19,7 @@
 
 ### ✨ Key Features
 
-- **Multi-Backend Support**: Unified interface for Intel CPU/DRAM, NVIDIA GPU, and Mobilint NPU.
+- **Multi-Backend Support**: Unified interface for Intel CPU/DRAM, NVIDIA GPU, NVIDIA Jetson, and Mobilint NPU.
 - **Background Tracking**: Uses a background scheduler to poll metrics without blocking your main execution.
 - **Comprehensive Metrics**: Capture Power (Watts), Utilization (%), Memory Usage (MB/%), and Temperature (C).
 - **Statistical Summaries**: Automatically calculates averages, peaks (max), and p99 values.
@@ -56,7 +56,7 @@ pip install -e .
 The typical workflow involves initializing a tracker, starting it before your target workload, and stopping it after.
 
 ```python
-from mblt_tracker import CPUDeviceTracker # or DRAMDeviceTracker, GPUDeviceTracker, NPUDeviceTracker
+from mblt_tracker import CPUDeviceTracker # or DRAMDeviceTracker, GPUDeviceTracker, JetsonDeviceTracker, NPUDeviceTracker
 
 # 1. Initialize with a polling interval (seconds)
 tracker = CPUDeviceTracker(interval=0.1)
@@ -609,14 +609,14 @@ Warning: NVML not available. GPU information will not be collected.
 
 ## Metrics Coverage
 
-| Metric | Intel CPU | Host DRAM | NVIDIA GPU | Mobilint NPU |
-| :--- | :---: | :---: | :---: | :---: |
-| **Power (W)** | ✅ (RAPL) | ✅ (RAPL DRAM) | ✅ (NVML) | ✅ (`mbltml`) |
-| **Utilization (%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
-| **Memory (MB/%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
-| **Temperature (C)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`mbltml`) |
-| **Static Info** | ✅ Host/OS/DRAM/Motherboard | ✅ Host/OS/DRAM/Motherboard | ✅ NVML + PCIe | ✅ `mbltml` + PCIe enrichment |
-| **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (`mbltml` Device Indices) |
+| Metric | Intel CPU | Host DRAM | NVIDIA GPU | NVIDIA Jetson | Mobilint NPU |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Power (W)** | ✅ (RAPL) | ✅ (RAPL DRAM) | ✅ (NVML) | ✅ (INA3221 sysfs) | ✅ (`mbltml`) |
+| **Utilization (%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (GPU `load` sysfs) | ✅ (`mbltml`) |
+| **Memory (MB/%)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (shared, `/proc/meminfo`) | ✅ (`mbltml`) |
+| **Temperature (C)** | ✅ (`psutil`) | N/A | ✅ (NVML) | ✅ (`gpu-thermal` zone) | ✅ (`mbltml`) |
+| **Static Info** | ✅ Host/OS/DRAM/Motherboard | ✅ Host/OS/DRAM/Motherboard | ✅ NVML + PCIe | ✅ Model + L4T + rails | ✅ `mbltml` + PCIe enrichment |
+| **Per-Device Stats** | ✅ (Sockets) | ✅ (Sockets) | ✅ (GPU Indices) | ✅ (Power Rails) | ✅ (`mbltml` Device Indices) |
 
 ---
 
@@ -684,6 +684,56 @@ Uses **NVML** (via `nvidia-ml-py`) for high-fidelity hardware monitoring.
 - **Dependencies**: Requires NVIDIA Drivers and NVML library installed.
 - **Temperature**: Reads on-die GPU temperature through NVML.
 - **Static Info**: `GPUDeviceTracker.get_static_info()` reports the detected GPU count, tracked device names, NVIDIA driver version, and the raw NVML CUDA driver version. The `mblt-tracker collect` CLI provides richer NVML-discovered GPU metadata; for NVIDIA GPUs, PCIe link generation/width fields come from NVML, while OS PCIe discovery may add non-link identifiers and descriptive metadata.
+
+### NVIDIA Jetson
+
+Reads the on-module **INA3221** power monitors and Tegra sysfs nodes. Jetson
+GPUs do not report power or utilization through NVML, so use
+`JetsonDeviceTracker` instead of `GPUDeviceTracker` on Jetson.
+
+- **Permission**: No root privileges required; all inputs are world-readable
+  sysfs/procfs files.
+- **Power scope**: Total power is **module power** measured by the
+  on-module INA3221 monitors. It is not carrier-board or whole-device power:
+  the fan, NVMe, USB devices, Ethernet, PCIe cards, and other carrier-board
+  loads are excluded. Use an external meter for wall power.
+- **Power**: Reports total power through the standard `avg_power_w`,
+  `p99_power_w`, and `max_power_w` keys and per-rail statistics for every
+  discovered rail under `metrics["rails"]`. Some rails already include
+  others, so the default total avoids double counting, following NVIDIA's
+  [power monitor tables](https://docs.nvidia.com/jetson/archives/r36.4.4/DeveloperGuide/SD/PlatformPowerAndPerformance/JetsonOrinNanoSeriesJetsonOrinNxSeriesAndJetsonAgxOrinSeries.html):
+  - if a module input rail `VDD_IN` exists (Orin NX/Nano), total power is
+    `VDD_IN` alone; its sub-rails `VDD_CPU_GPU_CV` and `VDD_SOC` are reported
+    per rail only;
+  - otherwise total power is the sum of the labeled rails minus known
+    sub-rails. On AGX Orin this is `VDD_GPU_SOC + VDD_CPU_CV + VIN_SYS_5V0`;
+    `VDDQ_VDD2_1V8AO` is already included in `VIN_SYS_5V0`.
+
+  `tracker.total_rails` and the static `power_total_rails` field list the
+  rails summed into total power. Pass
+  `JetsonDeviceTracker(rails=["VDD_GPU_SOC"])` to sum exactly the rails you
+  name instead; overlapping rails are then summed as requested, and every
+  rail is still reported under `metrics["rails"]`.
+
+  A tick records total power only when every rail summed into it was read;
+  if one is unreadable, that tick has no total-power sample instead of a
+  misleadingly low partial sum. Readable rails, utilization, memory, and
+  temperature are still recorded for that tick.
+- **Utilization**: Integrated GPU load from the GPU `load` node.
+- **Memory**: System memory from `/proc/meminfo`, which the CPU and GPU share.
+- **Temperature**: The `gpu-thermal` thermal zone.
+- **Detection**: `JetsonDeviceTracker.is_available()` returns `True` on a
+  Jetson with readable INA3221 rails.
+- **Static Info**: `JetsonDeviceTracker.get_static_info()` reports the device
+  tree model name, the L4T release, every discovered rail label
+  (`power_rails`), and the rails summed into total power
+  (`power_total_rails`).
+- **Installation**: `mblt-tracker` still depends on `mbltml`, which publishes
+  no aarch64 wheel. On Jetson, install it with
+  `pip install --no-deps mblt-tracker` and add `numpy`, `apscheduler`,
+  `psutil`, `pyRAPL`, `nvidia-ml-py`, and `setuptools`; `mblt_tracker` import
+  also needs an importable `mbltml` module until the NPU backend moves to
+  `mobilint-ml`.
 
 ### Host DRAM
 

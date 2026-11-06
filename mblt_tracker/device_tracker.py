@@ -48,16 +48,21 @@ class BaseDeviceTracker(ABC):
             )
 
     def stop(self) -> None:
-        """Stop tracking device metrics and shut down the scheduler."""
+        """Stop tracking device metrics and shut down the scheduler.
+
+        Calling ``stop()`` on a tracker that is not running is a no-op, so a
+        repeated ``stop()`` never appends a late sample to a finished window.
+        """
+        if self._scheduler is None:
+            return
         try:
             self._func_for_sched()
         except Exception:
             pass
-        if self._scheduler is not None:
-            try:
-                self._scheduler.shutdown(wait=True)
-            finally:
-                self._scheduler = None
+        try:
+            self._scheduler.shutdown(wait=True)
+        finally:
+            self._scheduler = None
 
     @abstractmethod
     def _func_for_sched(self) -> None:
